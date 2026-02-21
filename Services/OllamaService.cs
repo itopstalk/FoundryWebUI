@@ -44,6 +44,12 @@ public class OllamaService : ILlmProvider
         }
     }
 
+    public async Task<ProviderStatus> ReconnectAsync()
+    {
+        // Ollama endpoint is static, just re-check connectivity
+        return await GetStatusAsync();
+    }
+
     public async Task<List<ModelInfo>> GetAvailableModelsAsync()
     {
         // Ollama doesn't have a separate catalog — local models are what's available

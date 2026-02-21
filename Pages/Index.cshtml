@@ -7,6 +7,23 @@
 <div class="row g-0" style="height: calc(100vh - 70px);">
     <!-- Chat Area -->
     <div class="col d-flex flex-column">
+        <!-- Provider Status Panel -->
+        <div id="foundry-status-panel" class="p-2 border-bottom d-flex align-items-center gap-3" style="font-size: 0.85rem;">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fw-bold">Foundry Local:</span>
+                <span id="foundry-status-indicator" class="badge bg-secondary">Checking...</span>
+                <span id="foundry-endpoint-display" class="text-muted"></span>
+            </div>
+            <button id="btn-reconnect-foundry" class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size: 0.8rem;" title="Clear cached endpoint and re-discover Foundry Local">
+                🔄 Reconnect
+            </button>
+            <div class="d-flex align-items-center gap-2 ms-3">
+                <span class="fw-bold">Ollama:</span>
+                <span id="ollama-status-indicator" class="badge bg-secondary">Checking...</span>
+                <span id="ollama-endpoint-display" class="text-muted"></span>
+            </div>
+        </div>
+
         <!-- Model Selector -->
         <div class="p-3 border-bottom d-flex align-items-center gap-3">
             <label class="form-label mb-0 fw-bold">Model:</label>

@@ -31,6 +31,17 @@ public class ApiController : ControllerBase
         return Ok(statuses);
     }
 
+    [HttpPost("reconnect")]
+    public async Task<IActionResult> Reconnect([FromQuery] string provider = "foundry")
+    {
+        var p = GetProvider(provider);
+        if (p == null)
+            return NotFound(new { error = $"Provider '{provider}' not found" });
+
+        var status = await p.ReconnectAsync();
+        return Ok(status);
+    }
+
     [HttpGet("models")]
     public async Task<IActionResult> GetModels([FromQuery] string? provider = null)
     {

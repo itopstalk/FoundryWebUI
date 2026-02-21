@@ -119,6 +119,14 @@ public class FoundryLocalService : ILlmProvider
         }
     }
 
+    public async Task<ProviderStatus> ReconnectAsync()
+    {
+        _cachedEndpoint = null;
+        _catalogCache = null;
+        _logger.LogInformation("Foundry Local endpoint cache cleared, re-discovering...");
+        return await GetStatusAsync();
+    }
+
     public async Task<List<ModelInfo>> GetAvailableModelsAsync()
     {
         var models = new List<ModelInfo>();
