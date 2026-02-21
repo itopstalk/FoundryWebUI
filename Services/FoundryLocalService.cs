@@ -284,12 +284,12 @@ public class FoundryLocalService : ILlmProvider
         {
             _logger.LogInformation("Loading model {Model} at {Endpoint}", request.Model, endpoint);
             var loadResp = await _httpClient.GetAsync($"{endpoint}/openai/load/{Uri.EscapeDataString(request.Model)}", cancellationToken);
-            _logger.LogInformation("Model load response: {Status}", loadResp.StatusCode);
+            var loadBody = await loadResp.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogInformation("Model load response: {Status} — {Body}", loadResp.StatusCode, loadBody);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Model load request failed for {Model}", request.Model);
-            // Continue anyway — model might already be loaded
         }
 
         var payload = new
@@ -301,7 +301,7 @@ public class FoundryLocalService : ILlmProvider
         };
 
         var jsonStr = JsonSerializer.Serialize(payload);
-        _logger.LogInformation("Chat request to {Endpoint}/v1/chat/completions: {Payload}", endpoint, jsonStr);
+        _logger.LogInformation("Chat request to {Endpoint}/v1/chat/completions", endpoint);
         var jsonContent = new StringContent(jsonStr, Encoding.UTF8, "application/json");
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/v1/chat/completions")
         {
@@ -309,6 +309,7 @@ public class FoundryLocalService : ILlmProvider
         };
 
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        _logger.LogInformation("Chat response status: {Status}, Content-Type: {CT}", response.StatusCode, response.Content.Headers.ContentType);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -326,34 +327,42 @@ public class FoundryLocalService : ILlmProvider
         {
             var line = await reader.ReadLineAsync(cancellationToken);
             if (string.IsNullOrEmpty(line)) continue;
-            if (!line.StartsWith("data: ")) continue;
 
-            var data = line["data: ".Length..];
-            if (data == "[DONE]")
+            _logger.LogDebug("Stream line: {Line}", line);
+
+            // Parse SSE "data: {json}" or raw JSON lines
+            string? jsonData = null;
+            if (line.StartsWith("data: "))
+                jsonData = line["data: ".Length..];
+            else if (line.StartsWith("{"))
+                jsonData = line;
+            else
+                continue;
+
+            if (jsonData == "[DONE]")
             {
                 if (!receivedAnyContent)
-                    yield return new ChatResponse { Content = "(Model returned no content)", Done = true };
+                    yield return new ChatResponse { Content = "(Model returned [DONE] with no content)", Done = true };
                 else
                     yield return new ChatResponse { Done = true };
                 yield break;
             }
 
             JsonDocument? doc = null;
-            try { doc = JsonDocument.Parse(data); }
+            try { doc = JsonDocument.Parse(jsonData); }
             catch (Exception ex)
             {
-                _logger.LogWarning("Failed to parse SSE chunk: {Data} — {Error}", data, ex.Message);
+                _logger.LogWarning("Failed to parse: {Data} — {Error}", jsonData, ex.Message);
                 continue;
             }
 
             using (doc)
             {
-                // Check for error responses in the SSE stream
                 if (doc.RootElement.TryGetProperty("error", out var errProp))
                 {
                     var errMsg = errProp.ValueKind == JsonValueKind.String
                         ? errProp.GetString()
-                        : errProp.TryGetProperty("message", out var em) ? em.GetString() : data;
+                        : errProp.TryGetProperty("message", out var em) ? em.GetString() : jsonData;
                     yield return new ChatResponse { Content = $"⚠️ {errMsg}", Done = true };
                     yield break;
                 }
@@ -369,13 +378,23 @@ public class FoundryLocalService : ILlmProvider
                             if (text.Length > 0) receivedAnyContent = true;
                             yield return new ChatResponse { Content = text };
                         }
+                        else if (choice.TryGetProperty("message", out var message) &&
+                                 message.TryGetProperty("content", out var msgContent))
+                        {
+                            var text = msgContent.GetString() ?? "";
+                            if (text.Length > 0) receivedAnyContent = true;
+                            yield return new ChatResponse { Content = text, Done = true };
+                        }
                     }
                 }
             }
         }
 
         if (!receivedAnyContent)
-            yield return new ChatResponse { Content = "(No response received from model — it may still be loading. Try again in a moment.)", Done = true };
+        {
+            _logger.LogWarning("Chat stream ended with no content for model {Model}", request.Model);
+            yield return new ChatResponse { Content = "⚠️ No response from model. Check IIS stdout logs for details.", Done = true };
+        }
     }
 
     public async IAsyncEnumerable<DownloadProgress> DownloadModelAsync(string modelId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
