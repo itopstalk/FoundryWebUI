@@ -69,6 +69,7 @@ param(
     [switch]$SkipOllama,
     [switch]$SkipFirewall,
     [string]$FoundryEndpoint = "",
+    [int]$FoundryPort = 5273,
     [switch]$SkipPrerequisites
 )
 
@@ -307,8 +308,20 @@ if (Test-CommandExists "foundry") {
     }
 }
 
-# Start Foundry service
+# Start Foundry service with a fixed port
 if (Test-CommandExists "foundry") {
+    Write-Info "Configuring Foundry Local to use fixed port $FoundryPort..."
+    try {
+        $setProc = Start-Process -FilePath "foundry" -ArgumentList "service", "set", "--port", "$FoundryPort" `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\foundry-set.log" `
+            -RedirectStandardError "$env:TEMP\foundry-set-err.log"
+        $exited = $setProc.WaitForExit(15000)
+        if (-not $exited) { try { $setProc.Kill() } catch { } }
+        Write-Success "Foundry Local port set to $FoundryPort"
+    } catch {
+        Write-Warning2 "Could not set Foundry port: $_"
+    }
+
     Write-Info "Starting Foundry Local service..."
     try {
         # Use Start-Process with a timeout — foundry CLI commands can block indefinitely
@@ -337,10 +350,17 @@ if (Test-CommandExists "foundry") {
         }
 
         # Clean up temp files
-        Remove-Item "$env:TEMP\foundry-start.log", "$env:TEMP\foundry-start-err.log",
+        Remove-Item "$env:TEMP\foundry-set.log", "$env:TEMP\foundry-set-err.log",
+            "$env:TEMP\foundry-start.log", "$env:TEMP\foundry-start-err.log",
             "$env:TEMP\foundry-status.log", "$env:TEMP\foundry-status-err.log" -Force -ErrorAction SilentlyContinue
     } catch {
         Write-Warning2 "Could not start Foundry Local service: $_"
+    }
+
+    # Set the endpoint for appsettings.json if not explicitly provided
+    if (-not $FoundryEndpoint) {
+        $FoundryEndpoint = "http://localhost:$FoundryPort"
+        Write-Info "Foundry endpoint will be set to $FoundryEndpoint in appsettings.json"
     }
 }
 

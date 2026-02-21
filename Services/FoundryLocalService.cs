@@ -124,6 +124,34 @@ public class FoundryLocalService : ILlmProvider
         _cachedEndpoint = null;
         _catalogCache = null;
         _logger.LogInformation("Foundry Local endpoint cache cleared, re-discovering...");
+
+        // If there's an explicit endpoint in config, verify it directly
+        var configEndpoint = _configuration["LlmProviders:Foundry:Endpoint"];
+        if (!string.IsNullOrEmpty(configEndpoint))
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(5000);
+                var resp = await _httpClient.GetAsync($"{configEndpoint.TrimEnd('/')}/openai/status", cts.Token);
+                if (resp.IsSuccessStatusCode)
+                {
+                    _cachedEndpoint = configEndpoint.TrimEnd('/');
+                    return new ProviderStatus { Provider = ProviderName, IsAvailable = true, Endpoint = _cachedEndpoint };
+                }
+            }
+            catch { }
+
+            // Config endpoint didn't respond — return unavailable with helpful message
+            return new ProviderStatus
+            {
+                Provider = ProviderName,
+                IsAvailable = false,
+                Endpoint = configEndpoint,
+                Error = $"Foundry Local not responding on {configEndpoint}. Run 'foundry service set --port {new Uri(configEndpoint).Port}' then 'foundry service start' to fix."
+            };
+        }
+
+        // No explicit config — full CLI-based discovery via GetStatusAsync
         return await GetStatusAsync();
     }
 
