@@ -167,12 +167,13 @@ async function downloadSelected() {
 async function startDownload(modelId) {
     downloadProgress.classList.remove('d-none');
     downloadProgress.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    downloadBar.style.width = '0%';
-    downloadBar.textContent = '0%';
+    downloadBar.style.width = '100%';
+    downloadBar.textContent = 'Starting...';
     downloadBar.classList.remove('bg-danger', 'bg-success');
-    downloadBar.classList.add('progress-bar-animated');
-    downloadStatus.textContent = 'Starting download...';
+    downloadBar.classList.add('progress-bar-animated', 'progress-bar-striped');
+    downloadStatus.textContent = 'Connecting to Foundry Local...';
     downloadModelName.textContent = `Downloading ${modelId}...`;
+    let receivedPercent = false;
 
     return new Promise(async (resolve) => {
         try {
@@ -198,25 +199,33 @@ async function startDownload(modelId) {
                     if (line.startsWith('data: ')) {
                         try {
                             const data = JSON.parse(line.substring(6));
-                            console.log('Download progress:', data);
-                            if (data.percent != null) {
+                            console.log('Download SSE:', data);
+
+                            if (data.percent != null && data.percent > 0) {
+                                receivedPercent = true;
                                 downloadBar.style.width = `${data.percent}%`;
                                 downloadBar.textContent = `${Math.round(data.percent)}%`;
                             }
-                            if (data.status) {
+
+                            if (data.status === 'downloading' && !receivedPercent) {
+                                // Indeterminate: animated full bar
+                                downloadBar.style.width = '100%';
+                                downloadBar.textContent = 'Downloading... (waiting for progress)';
+                                downloadStatus.textContent = 'Download in progress — this may take several minutes for large models';
+                            } else if (data.status) {
                                 downloadStatus.textContent = data.status;
                             }
 
                             if (data.status === 'complete' || data.status === 'success') {
                                 downloadBar.style.width = '100%';
                                 downloadBar.textContent = '100%';
-                                downloadBar.classList.remove('progress-bar-animated');
+                                downloadBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
                                 downloadBar.classList.add('bg-success');
                                 downloadStatus.textContent = `✅ ${modelId} downloaded!`;
                             }
                             if (data.status && data.status.startsWith('error')) {
                                 downloadBar.classList.add('bg-danger');
-                                downloadBar.classList.remove('progress-bar-animated');
+                                downloadBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
                                 downloadStatus.textContent = `❌ Failed: ${data.status}`;
                             }
                         } catch (e) { console.warn('Parse error:', line, e); }
@@ -226,7 +235,7 @@ async function startDownload(modelId) {
         } catch (err) {
             downloadStatus.textContent = `❌ Error: ${err.message}`;
             downloadBar.classList.add('bg-danger');
-            downloadBar.classList.remove('progress-bar-animated');
+            downloadBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
         }
 
         // Refresh model list and uncheck the downloaded model

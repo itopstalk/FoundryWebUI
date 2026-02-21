@@ -8,7 +8,7 @@ builder.Services.AddControllers();
 
 // Register LLM provider
 builder.Services.AddHttpClient<FoundryLocalService>()
-    .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(10));
+    .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromHours(2));
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     sp.GetRequiredService<FoundryLocalService>());
 

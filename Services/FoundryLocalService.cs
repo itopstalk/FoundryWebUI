@@ -483,10 +483,13 @@ public class FoundryLocalService : ILlmProvider
                 Publisher = entry.TryGetProperty("publisher", out var dpub) ? dpub.GetString() ?? "" : "",
                 PromptTemplate = promptTemplate
             },
-            ignorePipeReport = true
+            ignorePipeReport = false
         };
 
         yield return new DownloadProgress { ModelId = modelId, Status = "downloading" };
+
+        _logger.LogInformation("Sending download request for {Model} to {Endpoint}/openai/download", modelId, endpoint);
+        _logger.LogDebug("Download payload: {Payload}", JsonSerializer.Serialize(downloadPayload));
 
         var jsonContent = new StringContent(JsonSerializer.Serialize(downloadPayload), Encoding.UTF8, "application/json");
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/openai/download")
@@ -499,6 +502,7 @@ public class FoundryLocalService : ILlmProvider
         try
         {
             response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            _logger.LogInformation("Download response status: {Status}, Content-Type: {CT}", response.StatusCode, response.Content.Headers.ContentType);
             response.EnsureSuccessStatusCode();
         }
         catch (Exception ex)
@@ -512,24 +516,31 @@ public class FoundryLocalService : ILlmProvider
             yield break;
         }
 
-        // The response streams progress as: ("filename", percentage)
+        // The response streams progress — format varies by Foundry version
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new System.IO.StreamReader(stream);
+        int lineCount = 0;
 
         while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(cancellationToken);
             if (string.IsNullOrEmpty(line)) continue;
 
-            // Parse streaming progress: ("file.onnx", 0.55) or JSON final response
-            var percentMatch = System.Text.RegularExpressions.Regex.Match(line, @",\s*([\d.]+)\)");
+            lineCount++;
+            _logger.LogDebug("Download stream line {N}: {Line}", lineCount, line.Length > 200 ? line[..200] + "..." : line);
+
+            // Parse streaming progress: ("file.onnx", 0.55) or (file, 55) or percentage patterns
+            var percentMatch = System.Text.RegularExpressions.Regex.Match(line, @",\s*([\d.]+)\s*\)");
             if (percentMatch.Success && double.TryParse(percentMatch.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pct))
             {
+                // Foundry may report 0.0-1.0 or 0-100 — normalize to 0-100
+                var percent = pct <= 1.0 ? Math.Round(pct * 100, 1) : Math.Round(pct, 1);
+                _logger.LogDebug("Download progress: {Pct}%", percent);
                 yield return new DownloadProgress
                 {
                     ModelId = modelId,
                     Status = "downloading",
-                    Percent = Math.Round(pct * 100, 1)
+                    Percent = percent
                 };
             }
 
@@ -540,10 +551,18 @@ public class FoundryLocalService : ILlmProvider
                 try
                 {
                     using var doc = JsonDocument.Parse(line);
-                    if (doc.RootElement.TryGetProperty("Success", out var success) && success.GetBoolean())
+                    _logger.LogInformation("Download JSON response: {Json}", line.Length > 500 ? line[..500] : line);
+                    // Check various success indicators (case-insensitive property names)
+                    var root = doc.RootElement;
+                    if ((root.TryGetProperty("Success", out var suc1) && suc1.GetBoolean()) ||
+                        (root.TryGetProperty("success", out var suc2) && suc2.GetBoolean()))
                         finalProgress = new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
-                    else if (doc.RootElement.TryGetProperty("ErrorMessage", out var err))
-                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err.GetString()}" };
+                    else if (root.TryGetProperty("ErrorMessage", out var err1))
+                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err1.GetString()}" };
+                    else if (root.TryGetProperty("errorMessage", out var err2))
+                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err2.GetString()}" };
+                    else if (root.TryGetProperty("error", out var err3))
+                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err3.GetString()}" };
                 }
                 catch { }
 
@@ -555,6 +574,7 @@ public class FoundryLocalService : ILlmProvider
             }
         }
 
+        _logger.LogInformation("Download stream ended after {Lines} lines for {Model}", lineCount, modelId);
         yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
     }
 
