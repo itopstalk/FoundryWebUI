@@ -513,31 +513,37 @@ public class FoundryLocalService : ILlmProvider
 
         try
         {
+            // Foundry uses "cache remove" not "model remove"
             var psi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = foundryPath,
-                Arguments = $"model remove \"{modelId}\"",
+                Arguments = $"cache remove \"{modelId}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
             using var process = System.Diagnostics.Process.Start(psi);
             if (process != null)
             {
+                // Auto-confirm any prompt
+                await process.StandardInput.WriteLineAsync("y");
+                process.StandardInput.Close();
+
                 var outputTask = process.StandardOutput.ReadToEndAsync();
                 var errorTask = process.StandardError.ReadToEndAsync();
                 if (process.WaitForExit(60000))
                 {
                     var output = await outputTask;
                     var error = await errorTask;
-                    _logger.LogInformation("Model remove output: {Output} {Error}", output, error);
+                    _logger.LogInformation("Cache remove exit: {Code}, stdout: {Out}, stderr: {Err}", process.ExitCode, output, error);
                     return process.ExitCode == 0;
                 }
                 else
                 {
                     try { process.Kill(); } catch { }
-                    _logger.LogWarning("Model remove timed out for {ModelId}", modelId);
+                    _logger.LogWarning("Cache remove timed out for {ModelId}", modelId);
                 }
             }
         }

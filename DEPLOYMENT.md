@@ -2,6 +2,8 @@
 
 This guide walks through a complete deployment of FoundryWebUI on a **fresh Windows Server 2025** installation (Desktop Experience) with no additional roles or features pre-installed.
 
+> **Note**: FoundryWebUI supports **Foundry Local only**. Ollama is not supported.
+
 > **All commands must be run in an elevated (Run as Administrator) PowerShell session** unless otherwise noted.
 
 ## Table of Contents
@@ -29,7 +31,7 @@ This guide walks through a complete deployment of FoundryWebUI on a **fresh Wind
 
 A PowerShell script (`Install-FoundryWebUI.ps1`) automates the entire installation and update process.
 
-**First run** — installs all prerequisites (IIS, .NET, Foundry Local, Ollama) and deploys the app.
+**First run** — installs all prerequisites (IIS, .NET, Foundry Local) and deploys the app.
 **Subsequent runs** — detects the existing installation, skips prerequisites, rebuilds from source, and redeploys while **preserving your `appsettings.json` customizations**.
 
 ```powershell
@@ -37,11 +39,11 @@ A PowerShell script (`Install-FoundryWebUI.ps1`) automates the entire installati
 .\Install-FoundryWebUI.ps1
 
 # Update after a git pull (elevated PowerShell)
+git reset --hard origin/main   # if local changes exist
 git pull
 .\Install-FoundryWebUI.ps1
 
 # Options:
-.\Install-FoundryWebUI.ps1 -SkipOllama              # Skip Ollama installation
 .\Install-FoundryWebUI.ps1 -Port 8080                # Use port 8080 instead of 80
 .\Install-FoundryWebUI.ps1 -SkipPrerequisites        # Skip all prereq checks (fast redeploy)
 .\Install-FoundryWebUI.ps1 -SourcePath "C:\Build"    # Deploy from a pre-built publish folder
@@ -270,6 +272,15 @@ foundry service status
 
 The output will display the Foundry Local endpoint URL (e.g., `http://localhost:5273`). **Record this URL** — you will need it if auto-detection does not work from IIS.
 
+#### Pin Foundry to a consistent port (recommended)
+
+By default, Foundry Local uses a random port on each start. Pin it to port 5273:
+
+```powershell
+foundry service set --port 5273
+foundry service start
+```
+
 #### Download a model for testing
 
 ```powershell
@@ -280,41 +291,15 @@ foundry model list
 foundry model run phi-3.5-mini
 ```
 
-> ℹ️ Foundry Local uses a dynamic port. The endpoint may change after a service restart. The FoundryWebUI app auto-detects the port via `foundry service status`, or you can set it explicitly in `appsettings.json`.
+#### Note the Foundry CLI path for IIS
 
-### 4b: Ollama (optional)
-
-```powershell
-winget install --id Ollama.Ollama --silent --accept-package-agreements --accept-source-agreements
-```
-
-After installation, Ollama starts automatically. Verify:
+IIS runs under a different user account and may not find `foundry.exe` on PATH. Record the path:
 
 ```powershell
-# Check Ollama is running (default port 11434)
-Invoke-RestMethod http://localhost:11434/api/tags
+Get-Command foundry | Select-Object Source
 ```
 
-#### Download a model for testing
-
-```powershell
-ollama pull llama3.2
-```
-
-#### If Ollama doesn't start automatically
-
-```powershell
-# Start Ollama manually
-Start-Process "ollama" -ArgumentList "serve" -WindowStyle Hidden
-```
-
-> ℹ️ To run Ollama as a Windows service that starts automatically, you can use [NSSM](https://nssm.cc/) or create a scheduled task:
-> ```powershell
-> $action = New-ScheduledTaskAction -Execute "ollama" -Argument "serve"
-> $trigger = New-ScheduledTaskTrigger -AtStartup
-> $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries
-> Register-ScheduledTask -TaskName "Ollama" -Action $action -Trigger $trigger -Settings $settings -User "SYSTEM" -RunLevel Highest
-> ```
+You will need this for `appsettings.json` (the installer sets it automatically).
 
 ---
 
@@ -429,10 +414,8 @@ Edit `C:\inetpub\FoundryWebUI\appsettings.json`:
   "AllowedHosts": "*",
   "LlmProviders": {
     "Foundry": {
-      "Endpoint": ""
-    },
-    "Ollama": {
-      "Endpoint": "http://localhost:11434"
+      "Endpoint": "http://localhost:5273",
+      "CliPath": ""
     }
   }
 }
@@ -442,8 +425,8 @@ Edit `C:\inetpub\FoundryWebUI\appsettings.json`:
 
 | Setting | Description |
 |---|---|
-| `LlmProviders:Foundry:Endpoint` | Leave **blank** to auto-detect via `foundry service status`. Set explicitly (e.g., `http://localhost:5273`) if auto-detection fails. |
-| `LlmProviders:Ollama:Endpoint` | Default is `http://localhost:11434`. Change only if Ollama runs on a different port or remote host. |
+| `LlmProviders:Foundry:Endpoint` | Leave **blank** to auto-detect via port scanning. Set explicitly (e.g., `http://localhost:5273`) for reliability. |
+| `LlmProviders:Foundry:CliPath` | Full path to `foundry.exe`. **Required** for model download and remove from the web UI. The installer sets this automatically. Find manually with `Get-Command foundry \| Select Source`. |
 | `AllowedHosts` | Set to `*` for open access. Restrict to specific hostnames for security (e.g., `myserver.contoso.com`). |
 
 ### Environment-Specific Overrides
@@ -526,10 +509,9 @@ Get-NetFirewallRule -DisplayName "FoundryWebUI*" | Format-Table Name, DisplayNam
 1. **Browse to the site**:
    Open a browser and navigate to `http://localhost` (or the port you configured).
 
-2. **Check the status indicators** in the top-right corner of the nav bar:
-   - **foundry ✓** (green) = Foundry Local is connected
-   - **ollama ✓** (green) = Ollama is connected
-   - **✗** (red) = Provider is unreachable
+2. **Check the status indicator** in the top-right corner of the nav bar:
+   - **Bright green square** + "Foundry Local Connection" = Connected
+   - **Bright red square** + "Foundry Local Connection" = Disconnected
 
 3. **Test the API directly**:
    ```powershell
@@ -650,17 +632,14 @@ If you prefer to update manually:
    ```powershell
    foundry service status
    ```
-2. Check that Ollama is running:
-   ```powershell
-   curl http://localhost:11434/api/tags
-   ```
-3. If Foundry Local is running but the app can't detect it, set the endpoint explicitly in `appsettings.json`:
+2. If Foundry Local is running but the app can't detect it, set the endpoint explicitly in `appsettings.json`:
    ```json
    "Foundry": {
-     "Endpoint": "http://localhost:5273"
+     "Endpoint": "http://localhost:5273",
+     "CliPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\foundry.exe"
    }
    ```
-4. Verify from the server itself:
+3. Verify from the server itself:
    ```powershell
    Invoke-RestMethod http://localhost/api/status
    ```
@@ -673,11 +652,8 @@ If you prefer to update manually:
    ```powershell
    foundry model run phi-3.5-mini
    ```
-3. For Ollama, models are loaded on first use. Test directly:
-   ```powershell
-   curl -X POST http://localhost:11434/api/chat -d '{"model":"llama3.2","messages":[{"role":"user","content":"hello"}],"stream":false}'
-   ```
-4. Check the app logs for HTTP timeout errors — large models may take time to load on first request.
+3. Check the app logs for HTTP timeout errors — large models may take time to load on first request.
+4. If chat shows empty bubbles, check the IIS stdout logs for JSON parsing errors. The app uses camelCase JSON serialization.
 
 ### 5. Foundry Local auto-detection fails
 
@@ -716,16 +692,49 @@ If you prefer to update manually:
 
 ### 8. High memory usage
 
-LLM models are memory-intensive. Monitor with:
+LLM models are memory-intensive. The Models page shows estimated RAM and a "Can Run" indicator for each model. Monitor with:
 ```powershell
-Get-Process -Name "dotnet", "foundry*", "ollama*" | Select-Object Name, WorkingSet64, CPU
+Get-Process -Name "dotnet", "foundry*" | Select-Object Name, WorkingSet64, CPU
 ```
 
-- **Foundry Local**: Each loaded model consumes RAM proportional to its size.
-- **Ollama**: Same applies; use `ollama ps` to see loaded models and `ollama stop <model>` to unload.
+- **Foundry Local**: Each loaded model consumes RAM proportional to its size (~1.2× file size).
 - The FoundryWebUI app itself uses minimal memory (~50–100 MB).
+- Use `foundry model unload <model>` to free memory from loaded models.
 
-### 9. Event Log Inspection
+### 9. Model download or remove fails: "foundry CLI not found"
+
+**Cause**: IIS runs under a different user account (`IIS AppPool\FoundryWebUI`) which doesn't have `foundry.exe` on its PATH. The Windows App Execution Alias at `WindowsApps\foundry.exe` only works for the installing user.
+
+**Solution**:
+1. Find the actual foundry path:
+   ```powershell
+   Get-Command foundry | Select-Object Source
+   ```
+2. Set it in `C:\inetpub\FoundryWebUI\appsettings.json`:
+   ```json
+   "Foundry": {
+     "Endpoint": "http://localhost:5273",
+     "CliPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\foundry.exe"
+   }
+   ```
+3. Restart the IIS site.
+
+> ℹ️ The installer auto-detects and sets this path. Re-run `.\Install-FoundryWebUI.ps1` to update it.
+
+### 10. Foundry CLI commands reference
+
+| Task | CLI Command |
+|---|---|
+| Start service | `foundry service start` |
+| Pin port | `foundry service set --port 5273` |
+| List catalog | `foundry model list` |
+| Download model | `foundry model download <model-alias>` |
+| Remove from cache | `foundry cache remove <model-id>` |
+| Load into memory | `foundry model load <model>` |
+| Unload from memory | `foundry model unload <model>` |
+| Check cache location | `foundry cache location` |
+
+### 11. Event Log Inspection
 
 When all else fails, check the Windows Event Log:
 ```powershell
@@ -748,22 +757,26 @@ Get-WinEvent -LogName "Application" -MaxEvents 20 |
 │              IIS + ASP.NET Core Module v2                     │
 │              FoundryWebUI (in-process)                        │
 │                                                              │
-│   /api/status    → check provider health                     │
-│   /api/models    → list models from all providers            │
-│   /api/chat      → streaming chat (SSE)                      │
-│   /api/models/download → download model (SSE progress)       │
-└────────┬────────────────────────────┬────────────────────────┘
-         │                            │
-         ▼                            ▼
-┌─────────────────────┐  ┌─────────────────────────┐
-│   Foundry Local     │  │        Ollama            │
-│  (dynamic port)     │  │  http://localhost:11434  │
-│                     │  │                          │
-│ /openai/models      │  │ /api/tags                │
-│ /foundry/list       │  │ /api/chat                │
-│ /v1/chat/completions│  │ /api/pull                │
-│ /openai/load/{name} │  │                          │
-└─────────────────────┘  └─────────────────────────┘
+│   /api/status        → check Foundry Local health            │
+│   /api/system-info   → system RAM for "Can Run" estimates    │
+│   /api/models        → list models (downloaded + catalog)    │
+│   /api/chat          → streaming chat (SSE)                  │
+│   /api/models/download → download model (via CLI)            │
+│   /api/models/{id}   → remove model (via CLI cache remove)   │
+│   /api/reconnect     → re-discover Foundry endpoint          │
+└────────┬─────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────┐
+│   Foundry Local     │
+│  http://localhost:   │
+│       5273          │
+│                     │
+│ /openai/models      │
+│ /foundry/list       │
+│ /v1/chat/completions│
+│ /openai/load/{name} │
+└─────────────────────┘
 ```
 
 ---
@@ -781,14 +794,14 @@ The `Install-FoundryWebUI.ps1` script automates the entire installation and upda
 | `-AppPoolName` | `FoundryWebUI` | IIS application pool name |
 | `-InstallPath` | `C:\inetpub\FoundryWebUI` | Published application directory |
 | `-SourcePath` | *(empty)* | Path to a pre-built publish folder. If omitted, builds from the project in the script's directory |
-| `-SkipOllama` | `$false` | Skip Ollama installation |
 | `-SkipFirewall` | `$false` | Skip firewall rule creation |
 | `-FoundryEndpoint` | *(empty)* | Explicit Foundry Local endpoint URL (e.g., `http://localhost:5273`). Leave empty for auto-detection |
+| `-FoundryPort` | `5273` | Port to pin Foundry Local to via `foundry service set --port` |
 | `-SkipPrerequisites` | `$false` | Skip all prerequisite checks. Use for fast redeployment when prerequisites are already installed |
 
 ### Behavior
 
-- **Fresh install** (no existing deployment at `InstallPath`): Installs IIS, .NET, Foundry Local, Ollama, creates IIS site, and deploys the app.
+- **Fresh install** (no existing deployment at `InstallPath`): Installs IIS, .NET, Foundry Local, creates IIS site, deploys the app, and auto-detects + configures the Foundry CLI path.
 - **Update** (existing `FoundryWebUI.dll` found at `InstallPath`): Stops IIS site, backs up `appsettings.json`, rebuilds, restores settings, restarts site. Prerequisites are automatically skipped.
 
 ### Usage Examples
@@ -798,14 +811,15 @@ The `Install-FoundryWebUI.ps1` script automates the entire installation and upda
 .\Install-FoundryWebUI.ps1
 
 # Update after git pull
+git reset --hard origin/main
 git pull
 .\Install-FoundryWebUI.ps1
 
 # Fast redeploy (skip prereq checks)
 .\Install-FoundryWebUI.ps1 -SkipPrerequisites
 
-# Install on a custom port without Ollama
-.\Install-FoundryWebUI.ps1 -Port 8080 -SkipOllama
+# Install on a custom port
+.\Install-FoundryWebUI.ps1 -Port 8080
 
 # Deploy from a pre-built publish folder
 .\Install-FoundryWebUI.ps1 -SourcePath "C:\Build\FoundryWebUI"

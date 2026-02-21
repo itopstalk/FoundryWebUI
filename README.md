@@ -1,6 +1,8 @@
 # FoundryWebUI
 
-A web-based chat interface for **Microsoft Foundry Local** and **Ollama**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core — designed to run on Windows Server alongside your local LLM inference engines.
+A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core — designed to run on Windows Server alongside your local LLM inference engine.
+
+> **Note**: This project supports **Foundry Local only**. Ollama is not supported.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20Server%202025-blue)
 ![Framework](https://img.shields.io/badge/.NET-8.0-purple)
@@ -8,12 +10,11 @@ A web-based chat interface for **Microsoft Foundry Local** and **Ollama**, hoste
 
 ## Features
 
-### Phase 1 (Current)
-
 - **💬 Chat Interface** — Conversational UI with streaming responses (Server-Sent Events), message history, and basic Markdown rendering
-- **📦 Model Management** — Browse available models, view loaded/downloaded status, and download new models with real-time progress
-- **🔌 Dual Provider Support** — Works with both Microsoft Foundry Local and Ollama simultaneously
-- **🔍 Auto-Discovery** — Automatically detects the Foundry Local endpoint via CLI; Ollama defaults to `localhost:11434`
+- **📦 Model Management** — Browse the full Foundry Local catalog (40+ models), download with progress tracking, and remove downloaded models
+- **✅ Can Run Indicator** — Estimates RAM requirements for each model and shows whether your system can run it
+- **🔌 Foundry Local Connection** — Bright green/red status indicator with endpoint display and reconnect button
+- **🔍 Auto-Discovery** — Automatically detects the Foundry Local endpoint via CLI or port scanning
 - **🌙 Dark Theme** — Bootstrap 5 dark mode UI optimized for extended use
 - **🚀 IIS Hosted** — Runs as an in-process IIS application with zero external dependencies beyond .NET
 
@@ -22,19 +23,17 @@ A web-based chat interface for **Microsoft Foundry Local** and **Ollama**, hoste
 ```
 Browser ──── HTTP/SSE ────▶ IIS + ASP.NET Core
                                 │
-                    ┌───────────┴───────────┐
-                    ▼                       ▼
-             Foundry Local              Ollama
-           (dynamic port)         (localhost:11434)
+                                ▼
+                         Foundry Local
+                        (port 5273)
 ```
 
 | Component | Role |
 |---|---|
 | **Razor Pages** | Chat (`/`) and Models (`/Models`) pages |
 | **API Controller** | REST + SSE endpoints under `/api/` |
-| **FoundryLocalService** | Adapter for Foundry Local REST API (`/v1/chat/completions`, `/foundry/list`, etc.) |
-| **OllamaService** | Adapter for Ollama REST API (`/api/chat`, `/api/tags`, `/api/pull`) |
-| **ILlmProvider** | Shared interface allowing both providers to be used interchangeably |
+| **FoundryLocalService** | Adapter for Foundry Local REST API + CLI (`foundry model download`, `foundry cache remove`) |
+| **ILlmProvider** | Provider interface for extensibility |
 
 ## Quick Start
 
@@ -42,17 +41,15 @@ Browser ──── HTTP/SSE ────▶ IIS + ASP.NET Core
 
 - Windows Server 2025 (or Windows 10/11)
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Microsoft Foundry Local](https://www.foundrylocal.ai/) and/or [Ollama](https://ollama.com)
+- [Microsoft Foundry Local](https://www.foundrylocal.ai/) (installed via `winget install Microsoft.FoundryLocal`)
 
 ### Run locally (development)
 
 ```powershell
-# Clone or copy the project
 cd C:\Projects\FoundryWebUI
 
-# Ensure at least one LLM provider is running
-foundry service start        # Foundry Local
-# ollama serve               # Ollama (optional)
+# Ensure Foundry Local is running
+foundry service start
 
 # Run the app
 dotnet run
@@ -77,24 +74,29 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step guide, including al
 After pulling the latest changes from Git, simply re-run the installer:
 
 ```powershell
+git reset --hard origin/main   # if local changes exist
 git pull
 .\Install-FoundryWebUI.ps1
 ```
 
 The script auto-detects existing installations and:
-- Skips prerequisite installation (IIS, .NET, Foundry, Ollama)
+- Skips prerequisite installation (IIS, .NET, Foundry Local)
 - Stops the IIS site, rebuilds from source, and redeploys
-- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint overrides)
+- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint, CLI path)
+- Auto-detects and configures the Foundry CLI path for IIS
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/status` | Provider health check (returns availability of each provider) |
-| `GET` | `/api/models` | List all models across providers (query `?provider=foundry` to filter) |
+| `GET` | `/api/status` | Provider health check |
+| `GET` | `/api/system-info` | System RAM info (for "Can Run" estimates) |
+| `GET` | `/api/models` | List all models (downloaded + catalog) |
 | `GET` | `/api/models/loaded` | List only currently loaded/ready models |
 | `POST` | `/api/chat?provider=foundry` | Streaming chat completion (SSE) |
-| `POST` | `/api/models/download` | Download/pull a model with progress (SSE) |
+| `POST` | `/api/models/download` | Download a model with progress (SSE) |
+| `DELETE` | `/api/models/{modelId}` | Remove a downloaded model from cache |
+| `POST` | `/api/reconnect` | Re-discover Foundry Local endpoint |
 
 ### Chat request example
 
@@ -114,16 +116,14 @@ Content-Type: application/json
 
 ## Configuration
 
-Edit `appsettings.json` (or `appsettings.Production.json` for production overrides):
+Edit `appsettings.json`:
 
 ```json
 {
   "LlmProviders": {
     "Foundry": {
-      "Endpoint": ""
-    },
-    "Ollama": {
-      "Endpoint": "http://localhost:11434"
+      "Endpoint": "",
+      "CliPath": ""
     }
   }
 }
@@ -132,7 +132,21 @@ Edit `appsettings.json` (or `appsettings.Production.json` for production overrid
 | Setting | Default | Notes |
 |---|---|---|
 | `Foundry:Endpoint` | *(blank — auto-detect)* | Set explicitly (e.g., `http://localhost:5273`) if auto-detection fails from IIS |
-| `Ollama:Endpoint` | `http://localhost:11434` | Change if Ollama runs on a different host/port |
+| `Foundry:CliPath` | *(blank — auto-detect)* | Full path to `foundry.exe`. Required for model download/remove from IIS. The installer sets this automatically |
+
+### Finding the Foundry CLI path
+
+If the installer doesn't auto-detect it, find it manually:
+
+```powershell
+Get-Command foundry | Select-Object Source
+```
+
+Set the result in `appsettings.json` (use double backslashes in JSON):
+
+```json
+"CliPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\foundry.exe"
+```
 
 ## Project Structure
 
@@ -144,20 +158,19 @@ FoundryWebUI/
 │   └── LlmModels.cs              # DTOs (ChatMessage, ModelInfo, etc.)
 ├── Services/
 │   ├── ILlmProvider.cs           # Provider interface
-│   ├── FoundryLocalService.cs    # Foundry Local adapter
-│   └── OllamaService.cs         # Ollama adapter
+│   └── FoundryLocalService.cs    # Foundry Local adapter (API + CLI)
 ├── Pages/
-│   ├── Index.cshtml              # Chat page
-│   ├── Models.cshtml             # Model management page
-│   └── Shared/_Layout.cshtml     # Shared layout (dark theme)
+│   ├── Index.cshtml              # Chat page with status panel
+│   ├── Models.cshtml             # Model management (download/remove)
+│   └── Shared/_Layout.cshtml     # Shared layout (dark theme, status indicator)
 ├── wwwroot/
 │   ├── css/site.css              # Custom styles
 │   └── js/
-│       ├── site.js               # Provider status check
+│       ├── site.js               # Foundry status check + reconnect
 │       ├── chat.js               # Chat UI logic + SSE streaming
-│       └── models.js             # Model listing + download progress
+│       └── models.js             # Model listing, download, remove
 ├── Program.cs                    # App startup and DI configuration
-├── appsettings.json              # Configuration
+├── appsettings.json              # Configuration (endpoint + CLI path)
 ├── web.config                    # IIS hosting configuration
 ├── Install-FoundryWebUI.ps1      # Automated deployment script
 └── DEPLOYMENT.md                 # Full deployment & troubleshooting guide
@@ -167,13 +180,15 @@ FoundryWebUI/
 
 | Symptom | Likely Cause | Fix |
 |---|---|---|
-| Provider shows red ✗ in nav bar | Provider not running or unreachable | Start the provider (`foundry service start` / `ollama serve`) |
-| No models listed | No models downloaded yet | Go to Models page and download one, or use CLI (`foundry model run phi-3.5-mini`) |
-| HTTP 500.30 on IIS | Hosting Bundle not installed or misconfigured | See [DEPLOYMENT.md — Troubleshooting](DEPLOYMENT.md#troubleshooting) |
-| Chat shows no streaming | Reverse proxy buffering SSE | Add `X-Accel-Buffering: no` header; see DEPLOYMENT.md |
+| Foundry shows red indicator in nav bar | Foundry Local not running or unreachable | Start it: `foundry service start` |
+| No models listed | Foundry Local not connected | Check endpoint in appsettings.json or click 🔄 Reconnect on home page |
+| Download fails: "foundry CLI not found" | IIS can't find `foundry.exe` | Set `CliPath` in appsettings.json (see Configuration) |
+| Remove fails | Wrong CLI command or CLI not found | Ensure `CliPath` is set; uses `foundry cache remove` |
+| HTTP 500.30 on IIS | Hosting Bundle not installed | See [DEPLOYMENT.md — Troubleshooting](DEPLOYMENT.md#troubleshooting) |
+| Chat shows no response | JSON casing mismatch or model not loaded | Check IIS stdout logs; ensure a model is loaded |
 | Can't access from other machines | Windows Firewall blocking port | `New-NetFirewallRule -DisplayName "FoundryWebUI" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow` |
 
-For the complete troubleshooting guide with 9 scenarios and solutions, see [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting).
+For the complete troubleshooting guide, see [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting).
 
 ## Roadmap
 
