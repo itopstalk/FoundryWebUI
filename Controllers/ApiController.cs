@@ -62,10 +62,12 @@ public class ApiController : ControllerBase
                 var loaded = await p.GetLoadedModelsAsync();
                 var available = await p.GetAvailableModelsAsync();
 
-                // Merge: mark loaded models, add available ones not yet loaded
-                var loadedIds = loaded.Select(m => m.Id).ToHashSet();
+                // Merge: loaded/downloaded models take priority, then add catalog entries not yet downloaded
+                var loadedIds = new HashSet<string>(loaded.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
                 allModels.AddRange(loaded);
                 allModels.AddRange(available.Where(m => !loadedIds.Contains(m.Id)));
+                _logger.LogInformation("Models: {Loaded} loaded/downloaded, {Available} in catalog, {Total} total after merge",
+                    loaded.Count, available.Count, allModels.Count);
             }
             catch (Exception ex)
             {

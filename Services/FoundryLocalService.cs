@@ -161,10 +161,19 @@ public class FoundryLocalService : ILlmProvider
         try
         {
             var endpoint = await GetEndpointAsync();
+            _logger.LogInformation("Fetching catalog from {Endpoint}/foundry/list", endpoint);
             var response = await _httpClient.GetAsync($"{endpoint}/foundry/list");
-            if (!response.IsSuccessStatusCode) return models;
+            _logger.LogInformation("Catalog response: {Status}", response.StatusCode);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errBody = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Catalog request failed: {Status} — {Body}", response.StatusCode, errBody);
+                return models;
+            }
 
             var json = await response.Content.ReadAsStringAsync();
+            _logger.LogDebug("Catalog JSON length: {Length}", json.Length);
             using var doc = JsonDocument.Parse(json);
 
             // Response: { "models": [ { "name": "...", "displayName": "...", "alias": "...", "fileSizeMb": N, ... } ] }
@@ -172,6 +181,7 @@ public class FoundryLocalService : ILlmProvider
             if (doc.RootElement.TryGetProperty("models", out modelsArray) && modelsArray.ValueKind == JsonValueKind.Array)
             {
                 _catalogCache = new List<JsonElement>();
+                _logger.LogInformation("Catalog contains {Count} models", modelsArray.GetArrayLength());
                 foreach (var model in modelsArray.EnumerateArray())
                 {
                     _catalogCache.Add(model.Clone());
@@ -201,6 +211,10 @@ public class FoundryLocalService : ILlmProvider
                         ParameterSize = deviceType
                     });
                 }
+            }
+            else
+            {
+                _logger.LogWarning("Catalog response has no 'models' array. Root kind: {Kind}", doc.RootElement.ValueKind);
             }
         }
         catch (Exception ex)
