@@ -74,15 +74,34 @@ public class ApiController : ControllerBase
 
                 // Merge: loaded/downloaded models take priority, then add catalog entries not yet downloaded
                 // Enrich downloaded models with catalog metadata (size, RAM estimates)
-                var catalogLookup = new Dictionary<string, ModelInfo>(StringComparer.OrdinalIgnoreCase);
+                // Build lookups by both alias (Id) and full name for matching
+                var catalogById = new Dictionary<string, ModelInfo>(StringComparer.OrdinalIgnoreCase);
+                var catalogByName = new Dictionary<string, ModelInfo>(StringComparer.OrdinalIgnoreCase);
                 foreach (var m in available)
                 {
-                    catalogLookup.TryAdd(m.Id, m);
+                    catalogById.TryAdd(m.Id, m);
+                    // The full catalog name (e.g., "Phi-3-mini-4k-instruct-generic-cpu:2") may match downloaded model IDs
+                    // Store a mapping from display name patterns too
                 }
+                // Build name-based lookup from the raw catalog for matching downloaded model IDs
+                // Downloaded models use full names like "Phi-3-mini-4k-instruct-generic-cpu:2"
+                // Catalog entries use aliases like "phi-3-mini-4k" as Id
+                // We need to match by checking if downloaded ID contains or equals catalog name patterns
                 var loadedIds = new HashSet<string>(loaded.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
                 foreach (var m in loaded)
                 {
-                    if (catalogLookup.TryGetValue(m.Id, out var catModel))
+                    ModelInfo? catModel = null;
+                    // Try direct match first
+                    if (!catalogById.TryGetValue(m.Id, out catModel))
+                    {
+                        // Downloaded IDs are like "Phi-3-mini-4k-instruct-generic-cpu:2" (name:version)
+                        // Catalog Names are like "Phi-3-mini-4k-instruct-generic-cpu" (displayName)
+                        var idWithoutVersion = m.Id.Contains(':') ? m.Id[..m.Id.LastIndexOf(':')] : m.Id;
+                        catModel = available.FirstOrDefault(a =>
+                            string.Equals(a.Name, idWithoutVersion, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(a.Name, m.Id, StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (catModel != null)
                     {
                         m.Size ??= catModel.Size;
                         m.EstimatedRamMb ??= catModel.EstimatedRamMb;
