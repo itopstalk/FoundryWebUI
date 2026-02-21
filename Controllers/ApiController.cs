@@ -73,7 +73,22 @@ public class ApiController : ControllerBase
                 var available = await p.GetAvailableModelsAsync();
 
                 // Merge: loaded/downloaded models take priority, then add catalog entries not yet downloaded
+                // Enrich downloaded models with catalog metadata (size, RAM estimates)
+                var catalogLookup = available.ToDictionary(m => m.Id, m => m, StringComparer.OrdinalIgnoreCase);
                 var loadedIds = new HashSet<string>(loaded.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
+                foreach (var m in loaded)
+                {
+                    if (catalogLookup.TryGetValue(m.Id, out var catModel))
+                    {
+                        m.Size ??= catModel.Size;
+                        m.EstimatedRamMb ??= catModel.EstimatedRamMb;
+                        m.Description ??= catModel.Description;
+                        m.Family ??= catModel.Family;
+                        m.ParameterSize ??= catModel.ParameterSize;
+                        if (string.IsNullOrEmpty(m.Name) || m.Name == m.Id)
+                            m.Name = catModel.Name;
+                    }
+                }
                 allModels.AddRange(loaded);
                 allModels.AddRange(available.Where(m => !loadedIds.Contains(m.Id)));
                 _logger.LogInformation("Models: {Loaded} loaded/downloaded, {Available} in catalog, {Total} total after merge",

@@ -30,7 +30,7 @@ function canRunBadge(estimatedRamMb) {
     if (!estimatedRamMb || !systemRamMb) return '<span class="badge bg-secondary">❓ Unknown</span>';
     const ratio = estimatedRamMb / systemRamMb;
     if (ratio <= 0.5) return '<span class="badge bg-success" title="Comfortable — uses less than 50% of RAM">✅ Yes</span>';
-    if (ratio <= 0.75) return '<span class="badge bg-warning text-dark" title="Tight — uses 50-75% of RAM">⚠️ Tight</span>';
+    if (ratio <= 0.75) return '<span class="badge bg-warning text-dark" title="Maybe — uses 50-75% of RAM">⚠️ Maybe</span>';
     return '<span class="badge bg-danger" title="Model likely too large for available RAM">❌ No</span>';
 }
 
