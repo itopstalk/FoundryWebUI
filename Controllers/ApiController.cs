@@ -11,6 +11,10 @@ public class ApiController : ControllerBase
 {
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly ILogger<ApiController> _logger;
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public ApiController(IEnumerable<ILlmProvider> providers, ILogger<ApiController> logger)
     {
@@ -108,7 +112,7 @@ public class ApiController : ControllerBase
         {
             await foreach (var chunk in p.StreamChatAsync(request, HttpContext.RequestAborted))
             {
-                var json = JsonSerializer.Serialize(chunk);
+                var json = JsonSerializer.Serialize(chunk, _jsonOptions);
                 await WriteSSE("message", json);
             }
         }
@@ -138,7 +142,7 @@ public class ApiController : ControllerBase
         {
             await foreach (var progress in p.DownloadModelAsync(request.ModelId, HttpContext.RequestAborted))
             {
-                var json = JsonSerializer.Serialize(progress);
+                var json = JsonSerializer.Serialize(progress, _jsonOptions);
                 await WriteSSE("progress", json);
             }
         }
