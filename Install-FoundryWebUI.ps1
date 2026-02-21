@@ -370,7 +370,11 @@ if ((Test-Path "$InstallPath\FoundryWebUI.dll") -and (Test-Path "$InstallPath\we
 # ============================================================
 Write-Step "Step 6: Creating IIS website"
 
-Import-Module WebAdministration
+Import-Module WebAdministration -Force
+# Ensure the IIS: PSDrive is available (not auto-mounted in all sessions)
+if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
+    New-PSDrive -Name IIS -PSProvider WebAdministration -Root "IIS:\" -ErrorAction SilentlyContinue | Out-Null
+}
 
 # Stop Default Web Site if it exists and we're using port 80
 if ($Port -eq 80) {
