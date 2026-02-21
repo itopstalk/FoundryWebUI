@@ -6,12 +6,14 @@ async function checkProviderStatus() {
         const statuses = await res.json();
         const foundry = statuses.find(s => s.provider === 'foundry') || statuses[0];
 
-        // Update navbar badge
-        const container = document.getElementById('provider-status');
-        if (container && foundry) {
-            container.innerHTML = `<span class="badge ${foundry.isAvailable ? 'bg-success' : 'bg-danger'}" title="${foundry.error || foundry.endpoint || ''}">
-                foundry ${foundry.isAvailable ? '✓' : '✗'}
-            </span>`;
+        // Update navbar indicator (bright green/red square)
+        const navLight = document.getElementById('foundry-nav-light');
+        const navStatus = document.getElementById('foundry-nav-status');
+        if (navLight && foundry) {
+            navLight.style.background = foundry.isAvailable ? '#00ff00' : '#ff0000';
+            navStatus.title = foundry.isAvailable
+                ? `Connected — ${foundry.endpoint || ''}`
+                : `Disconnected${foundry.error ? ' — ' + foundry.error : ''}`;
         }
 
         // Update status indicator on the chat page

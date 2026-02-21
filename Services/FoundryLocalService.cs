@@ -203,8 +203,15 @@ public class FoundryLocalService : ILlmProvider
                     var alias = model.TryGetProperty("alias", out var a) ? a.GetString() : null;
 
                     long? sizeBytes = null;
+                    double? fileSizeMb = null;
                     if (model.TryGetProperty("fileSizeMb", out var fsz) && fsz.ValueKind == JsonValueKind.Number)
-                        sizeBytes = (long)(fsz.GetDouble() * 1024 * 1024);
+                    {
+                        fileSizeMb = fsz.GetDouble();
+                        sizeBytes = (long)(fileSizeMb.Value * 1024 * 1024);
+                    }
+
+                    // Estimated RAM: ~1.2x file size (model weights + KV cache + runtime overhead)
+                    double? estimatedRamMb = fileSizeMb.HasValue ? Math.Round(fileSizeMb.Value * 1.2, 0) : null;
 
                     var publisher = model.TryGetProperty("publisher", out var pub) ? pub.GetString() : null;
                     var deviceType = "";
@@ -217,6 +224,7 @@ public class FoundryLocalService : ILlmProvider
                         Name = displayName,
                         Description = publisher != null ? $"by {publisher} ({deviceType})" : deviceType,
                         Size = sizeBytes,
+                        EstimatedRamMb = estimatedRamMb,
                         Status = "available",
                         Provider = ProviderName,
                         Family = model.TryGetProperty("task", out var task) ? task.GetString() : null,

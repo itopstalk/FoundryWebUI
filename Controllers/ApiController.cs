@@ -27,6 +27,16 @@ public class ApiController : ControllerBase
         return _providers.FirstOrDefault(p => p.ProviderName.Equals(provider, StringComparison.OrdinalIgnoreCase));
     }
 
+    [HttpGet("system-info")]
+    public IActionResult GetSystemInfo()
+    {
+        var gcInfo = GC.GetGCMemoryInfo();
+        var totalRamBytes = gcInfo.TotalAvailableMemoryBytes;
+        var totalRamMb = totalRamBytes / (1024.0 * 1024.0);
+        var totalRamGb = totalRamMb / 1024.0;
+        return Ok(new { totalRamMb = Math.Round(totalRamMb, 0), totalRamGb = Math.Round(totalRamGb, 1) });
+    }
+
     [HttpGet("status")]
     public async Task<IActionResult> GetStatus()
     {

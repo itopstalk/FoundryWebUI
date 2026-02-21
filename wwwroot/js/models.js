@@ -10,6 +10,7 @@ const downloadStatus = document.getElementById('download-status');
 const downloadModelName = document.getElementById('download-model-name');
 
 let allModels = [];
+let systemRamMb = null;
 
 function formatSize(bytes) {
     if (!bytes) return '—';
@@ -17,6 +18,20 @@ function formatSize(bytes) {
     if (gb >= 1) return `${gb.toFixed(1)} GB`;
     const mb = bytes / (1024 * 1024);
     return `${mb.toFixed(0)} MB`;
+}
+
+function formatRam(mb) {
+    if (!mb) return '—';
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${Math.round(mb)} MB`;
+}
+
+function canRunBadge(estimatedRamMb) {
+    if (!estimatedRamMb || !systemRamMb) return '<span class="badge bg-secondary">❓ Unknown</span>';
+    const ratio = estimatedRamMb / systemRamMb;
+    if (ratio <= 0.5) return '<span class="badge bg-success" title="Comfortable — uses less than 50% of RAM">✅ Yes</span>';
+    if (ratio <= 0.75) return '<span class="badge bg-warning text-dark" title="Tight — uses 50-75% of RAM">⚠️ Tight</span>';
+    return '<span class="badge bg-danger" title="Model likely too large for available RAM">❌ No</span>';
 }
 
 function statusBadge(status) {
@@ -35,17 +50,25 @@ function statusBadge(status) {
 
 async function loadModels() {
     try {
-        const res = await fetch('/api/models?provider=foundry');
-        allModels = await res.json();
+        // Fetch system info and models in parallel
+        const [sysRes, modelsRes] = await Promise.all([
+            fetch('/api/system-info'),
+            fetch('/api/models?provider=foundry')
+        ]);
+        if (sysRes.ok) {
+            const sysInfo = await sysRes.json();
+            systemRamMb = sysInfo.totalRamMb;
+        }
+        allModels = await modelsRes.json();
         renderModels();
     } catch (err) {
-        modelsTableBody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Error loading models: ${err.message}</td></tr>`;
+        modelsTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error loading models: ${err.message}</td></tr>`;
     }
 }
 
 function renderModels() {
     if (allModels.length === 0) {
-        modelsTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No models found. Check Foundry Local connection.</td></tr>';
+        modelsTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No models found. Check Foundry Local connection.</td></tr>';
         return;
     }
 
@@ -70,6 +93,8 @@ function renderModels() {
             </td>
             <td>${statusBadge(m.status)}</td>
             <td>${formatSize(m.size)}</td>
+            <td>${formatRam(m.estimatedRamMb)}</td>
+            <td>${canRunBadge(m.estimatedRamMb)}</td>
             <td>${m.parameterSize || '—'}</td>
             <td>
                 ${isAvailable ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadModel('${m.id}')">⬇️ Download</button>` : ''}
