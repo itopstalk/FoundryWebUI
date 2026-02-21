@@ -27,9 +27,9 @@
 
     <!-- Models Table -->
     <div class="card">
-        <div class="card-body p-0">
+        <div class="card-body p-0" style="max-height: calc(100vh - 220px); overflow-y: auto;">
             <table class="table table-hover mb-0">
-                <thead>
+                <thead class="sticky-top" style="background: var(--bs-body-bg); z-index: 1;">
                     <tr>
                         <th style="width: 40px;">
                             <input type="checkbox" id="select-all" class="form-check-input" title="Select all available models" />
