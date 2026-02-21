@@ -370,49 +370,44 @@ if ((Test-Path "$InstallPath\FoundryWebUI.dll") -and (Test-Path "$InstallPath\we
 # ============================================================
 Write-Step "Step 6: Creating IIS website"
 
-Import-Module WebAdministration -Force
-# Ensure the IIS: PSDrive is available (not auto-mounted in all sessions)
-if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
-    New-PSDrive -Name IIS -PSProvider WebAdministration -Root "IIS:\" -ErrorAction SilentlyContinue | Out-Null
-}
+Import-Module IISAdministration -ErrorAction SilentlyContinue
+$appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
 
 # Stop Default Web Site if it exists and we're using port 80
 if ($Port -eq 80) {
-    $defaultSite = Get-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
-    if ($defaultSite -and $defaultSite.State -eq "Started") {
+    $defaultSite = & $appcmd list site "Default Web Site" 2>$null
+    if ($defaultSite) {
         Write-Info "Stopping Default Web Site (port 80 conflict)..."
-        Stop-Website -Name "Default Web Site"
+        & $appcmd stop site "Default Web Site" 2>$null
         Write-Success "Default Web Site stopped"
     }
 }
 
 # Create or update app pool
-$existingPool = Get-WebAppPoolState -Name $AppPoolName -ErrorAction SilentlyContinue
+$existingPool = & $appcmd list apppool $AppPoolName 2>$null
 if ($existingPool) {
     Write-Info "Application pool '$AppPoolName' already exists, updating settings..."
 } else {
     Write-Info "Creating application pool '$AppPoolName'..."
-    New-WebAppPool -Name $AppPoolName | Out-Null
+    & $appcmd add apppool /name:$AppPoolName | Out-Null
 }
 
-Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "managedRuntimeVersion" -Value ""
-Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "managedPipelineMode" -Value "Integrated"
-Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "processModel.idleTimeout" -Value "00:00:00"
-Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "startMode" -Value "AlwaysRunning"
+& $appcmd set apppool $AppPoolName /managedRuntimeVersion:"" | Out-Null
+& $appcmd set apppool $AppPoolName /managedPipelineMode:"Integrated" | Out-Null
+& $appcmd set apppool $AppPoolName /processModel.idleTimeout:"00:00:00" | Out-Null
+& $appcmd set apppool $AppPoolName /startMode:"AlwaysRunning" | Out-Null
 Write-Success "Application pool configured"
 
 # Create or update website
-$existingSite = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
+$existingSite = & $appcmd list site $SiteName 2>$null
 if ($existingSite) {
     Write-Info "Website '$SiteName' already exists, updating..."
-    Set-ItemProperty "IIS:\Sites\$SiteName" -Name "physicalPath" -Value $InstallPath
-    Set-ItemProperty "IIS:\Sites\$SiteName" -Name "applicationPool" -Value $AppPoolName
+    & $appcmd set site $SiteName /`[path=`'/`'`].physicalPath:$InstallPath | Out-Null
+    & $appcmd set site $SiteName /`[path=`'/`'`].applicationPool:$AppPoolName | Out-Null
 } else {
     Write-Info "Creating website '$SiteName' on port $Port..."
-    New-Website -Name $SiteName `
-        -PhysicalPath $InstallPath `
-        -ApplicationPool $AppPoolName `
-        -Port $Port | Out-Null
+    & $appcmd add site /name:$SiteName /physicalPath:$InstallPath /bindings:"http/*:${Port}:" | Out-Null
+    & $appcmd set app "$SiteName/" /applicationPool:$AppPoolName | Out-Null
 }
 Write-Success "Website '$SiteName' created on port $Port"
 
@@ -489,8 +484,8 @@ if (-not $SkipFirewall) {
 Write-Step "Step 10: Starting and verifying deployment"
 
 # Ensure site is started
-Start-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
-Start-Website -Name $SiteName -ErrorAction SilentlyContinue
+& $appcmd start apppool $AppPoolName 2>$null
+& $appcmd start site $SiteName 2>$null
 Write-Success "Website started"
 
 # Test the site
