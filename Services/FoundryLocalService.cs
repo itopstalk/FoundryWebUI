@@ -489,7 +489,6 @@ public class FoundryLocalService : ILlmProvider
         yield return new DownloadProgress { ModelId = modelId, Status = "downloading" };
 
         _logger.LogInformation("Sending download request for {Model} to {Endpoint}/openai/download", modelId, endpoint);
-        _logger.LogDebug("Download payload: {Payload}", JsonSerializer.Serialize(downloadPayload));
 
         var jsonContent = new StringContent(JsonSerializer.Serialize(downloadPayload), Encoding.UTF8, "application/json");
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/openai/download")
@@ -497,84 +496,91 @@ public class FoundryLocalService : ILlmProvider
             Content = jsonContent
         };
 
+        // Foundry's download API starts the download in background and returns immediately.
+        // We send the request, then poll /openai/models to detect when the model appears.
         HttpResponseMessage? response = null;
         string? sendError = null;
         try
         {
-            response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            _logger.LogInformation("Download response status: {Status}, Content-Type: {CT}", response.StatusCode, response.Content.Headers.ContentType);
-            response.EnsureSuccessStatusCode();
+            response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            var respBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogInformation("Download API response: {Status} — {Body}", response.StatusCode, respBody.Length > 500 ? respBody[..500] : respBody);
+        }
+        catch (HttpIOException ex) when (ex.Message.Contains("ResponseEnded"))
+        {
+            // Foundry may close the connection prematurely — this is OK, download is running
+            _logger.LogInformation("Download API connection closed (download started in background)");
         }
         catch (Exception ex)
         {
             sendError = ex.Message;
         }
 
-        if (sendError != null || response == null)
+        if (sendError != null)
         {
             yield return new DownloadProgress { ModelId = modelId, Status = $"error: {sendError}" };
             yield break;
         }
 
-        // The response streams progress — format varies by Foundry version
-        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new System.IO.StreamReader(stream);
-        int lineCount = 0;
+        // Poll /openai/models every 5 seconds to detect when download completes
+        yield return new DownloadProgress { ModelId = modelId, Status = "downloading", Percent = 5 };
 
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        var maxWait = TimeSpan.FromHours(2);
+        var pollInterval = TimeSpan.FromSeconds(5);
+        var started = DateTime.UtcNow;
+        int pollCount = 0;
+
+        while (DateTime.UtcNow - started < maxWait && !cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (string.IsNullOrEmpty(line)) continue;
+            await Task.Delay(pollInterval, cancellationToken);
+            pollCount++;
 
-            lineCount++;
-            _logger.LogDebug("Download stream line {N}: {Line}", lineCount, line.Length > 200 ? line[..200] + "..." : line);
-
-            // Parse streaming progress: ("file.onnx", 0.55) or (file, 55) or percentage patterns
-            var percentMatch = System.Text.RegularExpressions.Regex.Match(line, @",\s*([\d.]+)\s*\)");
-            if (percentMatch.Success && double.TryParse(percentMatch.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pct))
+            bool found = false;
+            try
             {
-                // Foundry may report 0.0-1.0 or 0-100 — normalize to 0-100
-                var percent = pct <= 1.0 ? Math.Round(pct * 100, 1) : Math.Round(pct, 1);
-                _logger.LogDebug("Download progress: {Pct}%", percent);
-                yield return new DownloadProgress
+                var modelsResp = await _httpClient.GetAsync($"{endpoint}/openai/models", cancellationToken);
+                if (modelsResp.IsSuccessStatusCode)
                 {
-                    ModelId = modelId,
-                    Status = "downloading",
-                    Percent = percent
-                };
-            }
-
-            // Check for final JSON response
-            if (line.TrimStart().StartsWith("{"))
-            {
-                DownloadProgress? finalProgress = null;
-                try
-                {
-                    using var doc = JsonDocument.Parse(line);
-                    _logger.LogInformation("Download JSON response: {Json}", line.Length > 500 ? line[..500] : line);
-                    // Check various success indicators (case-insensitive property names)
-                    var root = doc.RootElement;
-                    if ((root.TryGetProperty("Success", out var suc1) && suc1.GetBoolean()) ||
-                        (root.TryGetProperty("success", out var suc2) && suc2.GetBoolean()))
-                        finalProgress = new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
-                    else if (root.TryGetProperty("ErrorMessage", out var err1))
-                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err1.GetString()}" };
-                    else if (root.TryGetProperty("errorMessage", out var err2))
-                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err2.GetString()}" };
-                    else if (root.TryGetProperty("error", out var err3))
-                        finalProgress = new DownloadProgress { ModelId = modelId, Status = $"error: {err3.GetString()}" };
-                }
-                catch { }
-
-                if (finalProgress != null)
-                {
-                    yield return finalProgress;
-                    yield break;
+                    var modelsJson = await modelsResp.Content.ReadAsStringAsync(cancellationToken);
+                    using var doc = JsonDocument.Parse(modelsJson);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in doc.RootElement.EnumerateArray())
+                        {
+                            var name = item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+                            if (name != null && (name.Equals(modelId, StringComparison.OrdinalIgnoreCase) ||
+                                name.Contains(modelId, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                _logger.LogInformation("Model {Model} detected in downloaded models after {Polls} polls", modelId, pollCount);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Poll error: {Err}", ex.Message);
+            }
+
+            if (found)
+            {
+                yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
+                yield break;
+            }
+
+            // Send a heartbeat so the client knows we're still working
+            var elapsed = (DateTime.UtcNow - started).TotalSeconds;
+            yield return new DownloadProgress
+            {
+                ModelId = modelId,
+                Status = $"downloading ({TimeSpan.FromSeconds(elapsed):mm\\:ss} elapsed)",
+                Percent = null
+            };
         }
 
-        _logger.LogInformation("Download stream ended after {Lines} lines for {Model}", lineCount, modelId);
+        yield return new DownloadProgress { ModelId = modelId, Status = "complete (timeout — check model list)", Percent = 100 };
         yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
     }
 

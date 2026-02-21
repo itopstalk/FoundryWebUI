@@ -205,13 +205,14 @@ async function startDownload(modelId) {
                                 receivedPercent = true;
                                 downloadBar.style.width = `${data.percent}%`;
                                 downloadBar.textContent = `${Math.round(data.percent)}%`;
+                                if (data.percent >= 100) {
+                                    downloadBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+                                    downloadBar.classList.add('bg-success');
+                                }
                             }
 
-                            if (data.status === 'downloading' && !receivedPercent) {
-                                // Indeterminate: animated full bar
-                                downloadBar.style.width = '100%';
-                                downloadBar.textContent = 'Downloading... (waiting for progress)';
-                                downloadStatus.textContent = 'Download in progress — this may take several minutes for large models';
+                            if (data.status && data.status.startsWith('downloading')) {
+                                downloadStatus.textContent = data.status;
                             } else if (data.status) {
                                 downloadStatus.textContent = data.status;
                             }
