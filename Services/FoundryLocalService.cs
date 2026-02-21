@@ -551,12 +551,36 @@ public class FoundryLocalService : ILlmProvider
     /// <summary>Find the foundry executable — IIS app pool may not have it on PATH.</summary>
     private string? FindFoundryExecutable()
     {
-        // Check each user profile for .foundry\bin\foundry.exe
+        // 1. Check appsettings.json config
+        var configPath = _configuration["LlmProviders:Foundry:CliPath"];
+        if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
+        {
+            _logger.LogInformation("Using configured foundry path: {Path}", configPath);
+            return configPath;
+        }
+        // Check each user profile for common foundry locations
         var usersDir = @"C:\Users";
         if (Directory.Exists(usersDir))
         {
             foreach (var userDir in Directory.GetDirectories(usersDir))
             {
+                // winget installs create App Execution Aliases here
+                var wingetAlias = Path.Combine(userDir, "AppData", "Local", "Microsoft", "WinGet", "Links", "foundry.exe");
+                if (File.Exists(wingetAlias))
+                {
+                    _logger.LogInformation("Found foundry at {Path}", wingetAlias);
+                    return wingetAlias;
+                }
+
+                // WindowsApps execution alias
+                var windowsApps = Path.Combine(userDir, "AppData", "Local", "Microsoft", "WindowsApps", "foundry.exe");
+                if (File.Exists(windowsApps))
+                {
+                    _logger.LogInformation("Found foundry at {Path}", windowsApps);
+                    return windowsApps;
+                }
+
+                // .foundry SDK install
                 var userFoundry = Path.Combine(userDir, ".foundry", "bin", "foundry.exe");
                 if (File.Exists(userFoundry))
                 {
@@ -571,6 +595,7 @@ public class FoundryLocalService : ILlmProvider
         {
             @"C:\Program Files\Foundry\foundry.exe",
             @"C:\Program Files (x86)\Foundry\foundry.exe",
+            @"C:\Program Files\WindowsApps\foundry.exe",
         };
         foreach (var path in candidates)
         {
