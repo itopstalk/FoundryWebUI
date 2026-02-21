@@ -431,154 +431,49 @@ public class FoundryLocalService : ILlmProvider
     {
         yield return new DownloadProgress { ModelId = modelId, Status = "starting" };
 
-        var endpoint = await GetEndpointAsync();
-
-        // Look up the catalog entry to get the URI and metadata needed for the download API
-        if (_catalogCache == null)
+        // Use the Foundry CLI to download — the HTTP API (/openai/download) is unreliable
+        var foundryPath = FindFoundryExecutable();
+        if (foundryPath == null)
         {
-            // Refresh catalog cache
-            await GetAvailableModelsAsync();
-        }
-
-        JsonElement? catalogEntry = _catalogCache?.FirstOrDefault(m =>
-        {
-            var name = m.TryGetProperty("alias", out var a) ? a.GetString() : null;
-            name ??= m.TryGetProperty("name", out var n) ? n.GetString() : null;
-            return string.Equals(name, modelId, StringComparison.OrdinalIgnoreCase) ||
-                   (m.TryGetProperty("name", out var fn) && string.Equals(fn.GetString(), modelId, StringComparison.OrdinalIgnoreCase));
-        });
-
-        if (catalogEntry == null || catalogEntry.Value.ValueKind == JsonValueKind.Undefined)
-        {
-            yield return new DownloadProgress { ModelId = modelId, Status = "error" };
+            yield return new DownloadProgress { ModelId = modelId, Status = "error: foundry CLI not found on system" };
             yield break;
         }
 
-        var entry = catalogEntry.Value;
-        var modelName = entry.TryGetProperty("name", out var mn) ? mn.GetString() ?? modelId : modelId;
-        var uri = entry.TryGetProperty("uri", out var u) ? u.GetString() ?? "" : "";
-        var providerType = entry.TryGetProperty("providerType", out var pt) ? pt.GetString() ?? "AzureFoundryLocal" : "AzureFoundryLocal";
-
-        // Build prompt template from catalog
-        var promptTemplate = new Dictionary<string, string>();
-        if (entry.TryGetProperty("promptTemplate", out var ptpl))
-        {
-            if (ptpl.TryGetProperty("assistant", out var ast)) promptTemplate["assistant"] = ast.GetString() ?? "";
-            if (ptpl.TryGetProperty("prompt", out var prm)) promptTemplate["prompt"] = prm.GetString() ?? "";
-            if (ptpl.TryGetProperty("system", out var sys)) promptTemplate["system"] = sys.GetString() ?? "";
-            if (ptpl.TryGetProperty("user", out var usr)) promptTemplate["user"] = usr.GetString() ?? "";
-        }
-
-        // Build version-suffixed name
-        var version = entry.TryGetProperty("version", out var ver) ? ver.GetString() ?? "" : "";
-        var nameWithVersion = !string.IsNullOrEmpty(version) ? $"{modelName}:{version}" : modelName;
-
-        var downloadPayload = new
-        {
-            model = new
-            {
-                Uri = uri,
-                ProviderType = providerType,
-                Name = nameWithVersion,
-                Publisher = entry.TryGetProperty("publisher", out var dpub) ? dpub.GetString() ?? "" : "",
-                PromptTemplate = promptTemplate
-            },
-            ignorePipeReport = false
-        };
-
+        _logger.LogInformation("Starting download of {Model} using CLI: {Foundry}", modelId, foundryPath);
         yield return new DownloadProgress { ModelId = modelId, Status = "downloading" };
 
-        _logger.LogInformation("Sending download request for {Model} to {Endpoint}/openai/download", modelId, endpoint);
-
-        var jsonContent = new StringContent(JsonSerializer.Serialize(downloadPayload), Encoding.UTF8, "application/json");
-        var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/openai/download")
+        var psi = new System.Diagnostics.ProcessStartInfo
         {
-            Content = jsonContent
+            FileName = foundryPath,
+            Arguments = $"model download \"{modelId}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
         };
 
-        // Foundry's download API starts the download in background and returns immediately.
-        // We send the request, then poll /openai/models to detect when the model appears.
-        bool requestSent = false;
-        string? sendError = null;
+        System.Diagnostics.Process? process = null;
+        string? startError = null;
         try
         {
-            // Use ResponseHeadersRead so we don't try to buffer the full body
-            var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            _logger.LogInformation("Download API response status: {Status}", response.StatusCode);
-            requestSent = true;
-            // Try to read body but don't fail if connection closes
-            try
-            {
-                var respBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogInformation("Download API body: {Body}", respBody.Length > 500 ? respBody[..500] : respBody);
-            }
-            catch (Exception bodyEx)
-            {
-                _logger.LogInformation("Download API body read failed (expected — download running in background): {Msg}", bodyEx.Message);
-            }
+            process = System.Diagnostics.Process.Start(psi);
         }
         catch (Exception ex)
         {
-            // Foundry often closes the connection prematurely — this is normal, download is running
-            _logger.LogInformation("Download API request exception (download may still be running): {Msg}", ex.Message);
-            requestSent = true; // Assume the request was received
+            startError = ex.Message;
         }
 
-        if (!requestSent && sendError != null)
+        if (process == null || startError != null)
         {
-            yield return new DownloadProgress { ModelId = modelId, Status = $"error: {sendError}" };
+            yield return new DownloadProgress { ModelId = modelId, Status = $"error: failed to start foundry CLI — {startError}" };
             yield break;
         }
 
-        // Poll /openai/models every 5 seconds to detect when download completes
-        yield return new DownloadProgress { ModelId = modelId, Status = "downloading", Percent = 5 };
-
-        var maxWait = TimeSpan.FromHours(2);
-        var pollInterval = TimeSpan.FromSeconds(5);
+        // Poll until the process exits, sending heartbeats
         var started = DateTime.UtcNow;
-        int pollCount = 0;
-
-        while (DateTime.UtcNow - started < maxWait && !cancellationToken.IsCancellationRequested)
+        while (!process.HasExited && !cancellationToken.IsCancellationRequested)
         {
-            await Task.Delay(pollInterval, cancellationToken);
-            pollCount++;
-
-            bool found = false;
-            try
-            {
-                var modelsResp = await _httpClient.GetAsync($"{endpoint}/openai/models", cancellationToken);
-                if (modelsResp.IsSuccessStatusCode)
-                {
-                    var modelsJson = await modelsResp.Content.ReadAsStringAsync(cancellationToken);
-                    using var doc = JsonDocument.Parse(modelsJson);
-                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in doc.RootElement.EnumerateArray())
-                        {
-                            var name = item.ValueKind == JsonValueKind.String ? item.GetString() : null;
-                            if (name != null && (name.Equals(modelId, StringComparison.OrdinalIgnoreCase) ||
-                                name.Contains(modelId, StringComparison.OrdinalIgnoreCase)))
-                            {
-                                _logger.LogInformation("Model {Model} detected in downloaded models after {Polls} polls", modelId, pollCount);
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug("Poll error: {Err}", ex.Message);
-            }
-
-            if (found)
-            {
-                yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
-                yield break;
-            }
-
-            // Send a heartbeat so the client knows we're still working
+            await Task.Delay(3000, cancellationToken);
             var elapsed = (DateTime.UtcNow - started).TotalSeconds;
             yield return new DownloadProgress
             {
@@ -588,18 +483,39 @@ public class FoundryLocalService : ILlmProvider
             };
         }
 
-        yield return new DownloadProgress { ModelId = modelId, Status = "complete (timeout — check model list)", Percent = 100 };
-        yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
+        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
+        _logger.LogInformation("Foundry download exit code: {Code}, stdout: {Out}, stderr: {Err}",
+            process.ExitCode,
+            stdout.Length > 500 ? stdout[..500] : stdout,
+            stderr.Length > 500 ? stderr[..500] : stderr);
+
+        if (process.ExitCode == 0)
+        {
+            yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
+        }
+        else
+        {
+            var errMsg = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
+            yield return new DownloadProgress { ModelId = modelId, Status = $"error: {errMsg}" };
+        }
     }
 
     public async Task<bool> DeleteModelAsync(string modelId, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Deleting model {ModelId}", modelId);
+        var foundryPath = FindFoundryExecutable();
+        if (foundryPath == null)
+        {
+            _logger.LogError("foundry CLI not found — cannot delete model");
+            return false;
+        }
+
         try
         {
             var psi = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "foundry",
+                FileName = foundryPath,
                 Arguments = $"model remove \"{modelId}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -630,5 +546,57 @@ public class FoundryLocalService : ILlmProvider
             _logger.LogError(ex, "Failed to delete model {ModelId}", modelId);
         }
         return false;
+    }
+
+    /// <summary>Find the foundry executable — IIS app pool may not have it on PATH.</summary>
+    private string? FindFoundryExecutable()
+    {
+        // Check each user profile for .foundry\bin\foundry.exe
+        var usersDir = @"C:\Users";
+        if (Directory.Exists(usersDir))
+        {
+            foreach (var userDir in Directory.GetDirectories(usersDir))
+            {
+                var userFoundry = Path.Combine(userDir, ".foundry", "bin", "foundry.exe");
+                if (File.Exists(userFoundry))
+                {
+                    _logger.LogInformation("Found foundry at {Path}", userFoundry);
+                    return userFoundry;
+                }
+            }
+        }
+
+        // Check common install locations
+        var candidates = new[]
+        {
+            @"C:\Program Files\Foundry\foundry.exe",
+            @"C:\Program Files (x86)\Foundry\foundry.exe",
+        };
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path)) return path;
+        }
+
+        // Try PATH via 'where' command as fallback
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "where",
+                Arguments = "foundry",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null && proc.WaitForExit(5000) && proc.ExitCode == 0)
+            {
+                var result = proc.StandardOutput.ReadToEnd().Trim().Split('\n')[0].Trim();
+                if (File.Exists(result)) return result;
+            }
+        }
+        catch { }
+
+        return null;
     }
 }
