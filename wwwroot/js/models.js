@@ -1,13 +1,13 @@
-// models.js - Model management logic
+// models.js - Model management logic (Foundry Local only)
 const modelsTableBody = document.getElementById('models-table-body');
-const providerFilter = document.getElementById('provider-filter');
 const btnRefresh = document.getElementById('btn-refresh');
-const btnDownload = document.getElementById('btn-download');
-const downloadProvider = document.getElementById('download-provider');
-const downloadModelId = document.getElementById('download-model-id');
+const btnDownloadSelected = document.getElementById('btn-download-selected');
+const selectedCountSpan = document.getElementById('selected-count');
+const selectAllCheckbox = document.getElementById('select-all');
 const downloadProgress = document.getElementById('download-progress');
 const downloadBar = document.getElementById('download-bar');
 const downloadStatus = document.getElementById('download-status');
+const downloadModelName = document.getElementById('download-model-name');
 
 let allModels = [];
 
@@ -25,18 +25,17 @@ function statusBadge(status) {
         'downloaded': 'bg-info',
         'available': 'bg-secondary'
     };
-    return `<span class="badge ${map[status] || 'bg-secondary'}">${status || 'unknown'}</span>`;
-}
-
-function providerBadge(provider) {
-    return `<span class="badge ${provider === 'foundry' ? 'bg-info' : 'bg-warning'}">${provider}</span>`;
+    const labels = {
+        'loaded': '🟢 Loaded',
+        'downloaded': '🔵 Downloaded',
+        'available': '⬜ Available'
+    };
+    return `<span class="badge ${map[status] || 'bg-secondary'}">${labels[status] || status || 'unknown'}</span>`;
 }
 
 async function loadModels() {
     try {
-        const filter = providerFilter.value;
-        const url = filter ? `/api/models?provider=${filter}` : '/api/models';
-        const res = await fetch(url);
+        const res = await fetch('/api/models?provider=foundry');
         allModels = await res.json();
         renderModels();
     } catch (err) {
@@ -46,102 +45,167 @@ async function loadModels() {
 
 function renderModels() {
     if (allModels.length === 0) {
-        modelsTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No models found</td></tr>';
+        modelsTableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No models found. Check Foundry Local connection.</td></tr>';
         return;
     }
 
-    modelsTableBody.innerHTML = allModels.map(m => `
+    // Sort: loaded first, then downloaded, then available
+    const order = { 'loaded': 0, 'downloaded': 1, 'available': 2 };
+    const sorted = [...allModels].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+
+    modelsTableBody.innerHTML = sorted.map(m => {
+        const isAvailable = m.status === 'available';
+        const checkboxId = `chk-${(m.id || '').replace(/[^a-zA-Z0-9]/g, '-')}`;
+        return `
         <tr>
+            <td>
+                ${isAvailable
+                    ? `<input type="checkbox" class="form-check-input model-checkbox" data-model-id="${m.id}" id="${checkboxId}" />`
+                    : ''}
+            </td>
             <td>
                 <strong>${m.name || m.id}</strong>
                 ${m.description ? `<br><small class="text-muted">${m.description}</small>` : ''}
                 ${m.family ? `<br><span class="badge bg-dark">${m.family}</span>` : ''}
             </td>
-            <td>${providerBadge(m.provider)}</td>
             <td>${statusBadge(m.status)}</td>
             <td>${formatSize(m.size)}</td>
             <td>${m.parameterSize || '—'}</td>
             <td>
-                ${m.status === 'available' ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadModel('${m.id}', '${m.provider}')">⬇️ Download</button>` : ''}
+                ${isAvailable ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadModel('${m.id}')">⬇️ Download</button>` : ''}
                 ${m.status === 'downloaded' || m.status === 'loaded' ? `<a href="/" class="btn btn-sm btn-outline-success">💬 Chat</a>` : ''}
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
+
+    // Attach checkbox listeners
+    document.querySelectorAll('.model-checkbox').forEach(cb => {
+        cb.addEventListener('change', updateSelectedCount);
+    });
+    updateSelectedCount();
 }
 
-async function downloadModel(modelId, provider) {
-    downloadModelId.value = modelId;
-    downloadProvider.value = provider;
-    startDownload();
+function getSelectedModelIds() {
+    return Array.from(document.querySelectorAll('.model-checkbox:checked')).map(cb => cb.dataset.modelId);
 }
 
-async function startDownload() {
-    const modelId = downloadModelId.value.trim();
-    const provider = downloadProvider.value;
-    if (!modelId) return;
+function updateSelectedCount() {
+    const count = getSelectedModelIds().length;
+    selectedCountSpan.textContent = count;
+    btnDownloadSelected.disabled = count === 0;
 
+    // Update select-all state
+    const allCheckboxes = document.querySelectorAll('.model-checkbox');
+    if (allCheckboxes.length === 0) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+    } else if (count === allCheckboxes.length) {
+        selectAllCheckbox.checked = true;
+        selectAllCheckbox.indeterminate = false;
+    } else if (count > 0) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = true;
+    } else {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+    }
+}
+
+// Select all toggle
+selectAllCheckbox.addEventListener('change', () => {
+    const checked = selectAllCheckbox.checked;
+    document.querySelectorAll('.model-checkbox').forEach(cb => { cb.checked = checked; });
+    updateSelectedCount();
+});
+
+// Download a single model
+async function downloadModel(modelId) {
+    await startDownload(modelId);
+}
+
+// Download selected models sequentially
+async function downloadSelected() {
+    const ids = getSelectedModelIds();
+    if (ids.length === 0) return;
+
+    btnDownloadSelected.disabled = true;
+
+    for (let i = 0; i < ids.length; i++) {
+        downloadModelName.textContent = `Downloading ${ids[i]} (${i + 1} of ${ids.length})...`;
+        await startDownload(ids[i]);
+    }
+
+    btnDownloadSelected.disabled = false;
+    updateSelectedCount();
+}
+
+async function startDownload(modelId) {
     downloadProgress.classList.remove('d-none');
     downloadBar.style.width = '0%';
     downloadBar.textContent = '0%';
+    downloadBar.classList.remove('bg-danger');
+    downloadBar.classList.add('progress-bar-animated');
     downloadStatus.textContent = 'Starting download...';
-    btnDownload.disabled = true;
+    downloadModelName.textContent = `Downloading ${modelId}...`;
 
-    try {
-        const res = await fetch('/api/models/download', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modelId, provider })
-        });
+    return new Promise(async (resolve) => {
+        try {
+            const res = await fetch('/api/models/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ modelId, provider: 'foundry' })
+            });
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
 
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.substring(6));
-                        if (data.percent != null) {
-                            downloadBar.style.width = `${data.percent}%`;
-                            downloadBar.textContent = `${data.percent}%`;
-                        }
-                        downloadStatus.textContent = data.status || '';
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            if (data.percent != null) {
+                                downloadBar.style.width = `${data.percent}%`;
+                                downloadBar.textContent = `${Math.round(data.percent)}%`;
+                            }
+                            downloadStatus.textContent = data.status || '';
 
-                        if (data.status === 'complete' || data.status === 'success') {
-                            downloadBar.style.width = '100%';
-                            downloadBar.textContent = '100%';
-                            downloadBar.classList.remove('progress-bar-animated');
-                            downloadStatus.textContent = '✅ Download complete!';
-                            setTimeout(() => loadModels(), 1000);
-                        }
-                        if (data.status === 'error') {
-                            downloadBar.classList.add('bg-danger');
-                            downloadStatus.textContent = '❌ Download failed';
-                        }
-                    } catch { }
+                            if (data.status === 'complete' || data.status === 'success') {
+                                downloadBar.style.width = '100%';
+                                downloadBar.textContent = '100%';
+                                downloadBar.classList.remove('progress-bar-animated');
+                                downloadStatus.textContent = `✅ ${modelId} downloaded!`;
+                            }
+                            if (data.status && data.status.startsWith('error')) {
+                                downloadBar.classList.add('bg-danger');
+                                downloadStatus.textContent = `❌ Failed: ${data.status}`;
+                            }
+                        } catch { }
+                    }
                 }
             }
+        } catch (err) {
+            downloadStatus.textContent = `❌ Error: ${err.message}`;
+            downloadBar.classList.add('bg-danger');
         }
-    } catch (err) {
-        downloadStatus.textContent = `❌ Error: ${err.message}`;
-        downloadBar.classList.add('bg-danger');
-    }
 
-    btnDownload.disabled = false;
+        // Refresh model list and uncheck the downloaded model
+        await loadModels();
+        resolve();
+    });
 }
 
 // Event listeners
-providerFilter.addEventListener('change', loadModels);
 btnRefresh.addEventListener('click', loadModels);
-btnDownload.addEventListener('click', startDownload);
+btnDownloadSelected.addEventListener('click', downloadSelected);
 
 // Make downloadModel available globally for inline onclick
 window.downloadModel = downloadModel;

@@ -8,43 +8,20 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h3>📦 Model Management</h3>
         <div class="d-flex gap-2">
-            <select id="provider-filter" class="form-select form-select-sm" style="width: auto;">
-                <option value="">All Providers</option>
-                <option value="foundry">Foundry Local</option>
-                <option value="ollama">Ollama</option>
-            </select>
+            <button id="btn-download-selected" class="btn btn-sm btn-primary" disabled>⬇️ Download Selected (<span id="selected-count">0</span>)</button>
             <button id="btn-refresh" class="btn btn-sm btn-outline-light">🔄 Refresh</button>
         </div>
     </div>
 
-    <!-- Pull Model (Ollama) -->
-    <div class="card mb-3">
+    <!-- Download Progress -->
+    <div id="download-progress" class="card mb-3 d-none">
         <div class="card-body">
-            <h5 class="card-title">Download / Pull Model</h5>
-            <div class="row g-2 align-items-end">
-                <div class="col-auto">
-                    <label class="form-label">Provider</label>
-                    <select id="download-provider" class="form-select form-select-sm">
-                        <option value="foundry">Foundry Local</option>
-                        <option value="ollama">Ollama</option>
-                    </select>
-                </div>
-                <div class="col">
-                    <label class="form-label">Model Name / ID</label>
-                    <input id="download-model-id" type="text" class="form-control form-control-sm"
-                           placeholder="e.g. phi-3.5-mini or llama3.2:latest" />
-                </div>
-                <div class="col-auto">
-                    <button id="btn-download" class="btn btn-sm btn-primary">⬇️ Download</button>
-                </div>
+            <h6 id="download-model-name" class="card-title">Downloading...</h6>
+            <div class="progress" style="height: 24px;">
+                <div id="download-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                     role="progressbar" style="width: 0%;">0%</div>
             </div>
-            <div id="download-progress" class="mt-2 d-none">
-                <div class="progress" style="height: 24px;">
-                    <div id="download-bar" class="progress-bar progress-bar-striped progress-bar-animated"
-                         role="progressbar" style="width: 0%;">0%</div>
-                </div>
-                <small id="download-status" class="text-muted"></small>
-            </div>
+            <small id="download-status" class="text-muted mt-1 d-block"></small>
         </div>
     </div>
 
@@ -54,11 +31,13 @@
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
+                        <th style="width: 40px;">
+                            <input type="checkbox" id="select-all" class="form-check-input" title="Select all available models" />
+                        </th>
                         <th>Model</th>
-                        <th>Provider</th>
                         <th>Status</th>
                         <th>Size</th>
-                        <th>Parameters</th>
+                        <th>Device</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
