@@ -35,24 +35,7 @@ public class FoundryLocalService : ILlmProvider
         if (_cachedEndpoint != null)
             return _cachedEndpoint;
 
-        // Try to discover via /openai/status on common ports
-        foreach (var port in new[] { 5272, 5273, 5274 })
-        {
-            try
-            {
-                var testUrl = $"http://localhost:{port}/openai/status";
-                var resp = await _httpClient.GetAsync(testUrl, new CancellationTokenSource(3000).Token);
-                if (resp.IsSuccessStatusCode)
-                {
-                    _cachedEndpoint = $"http://localhost:{port}";
-                    _logger.LogInformation("Discovered Foundry Local at {Endpoint}", _cachedEndpoint);
-                    return _cachedEndpoint;
-                }
-            }
-            catch { }
-        }
-
-        // Try CLI discovery as fallback
+        // Primary: discover via foundry CLI (port is random on each start)
         try
         {
             var psi = new System.Diagnostics.ProcessStartInfo
@@ -67,14 +50,16 @@ public class FoundryLocalService : ILlmProvider
             using var process = System.Diagnostics.Process.Start(psi);
             if (process != null)
             {
-                using var cts = new CancellationTokenSource(10000);
-                var output = await process.StandardOutput.ReadToEndAsync(cts.Token);
-                if (process.WaitForExit(10000))
+                var outputTask = process.StandardOutput.ReadToEndAsync();
+                if (process.WaitForExit(15000))
                 {
-                    var match = System.Text.RegularExpressions.Regex.Match(output, @"(https?://[^\s]+)");
+                    var output = await outputTask;
+                    // Output contains: "http://127.0.0.1:49681/openai/status" — extract base URL
+                    var match = System.Text.RegularExpressions.Regex.Match(output, @"(https?://[\d.]+:\d+)");
                     if (match.Success)
                     {
                         _cachedEndpoint = match.Value.TrimEnd('/');
+                        _logger.LogInformation("Discovered Foundry Local at {Endpoint}", _cachedEndpoint);
                         return _cachedEndpoint;
                     }
                 }
@@ -87,6 +72,24 @@ public class FoundryLocalService : ILlmProvider
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to discover Foundry Local endpoint via CLI");
+        }
+
+        // Fallback: probe common ports
+        foreach (var port in new[] { 5272, 5273, 5274 })
+        {
+            try
+            {
+                var testUrl = $"http://localhost:{port}/openai/status";
+                using var cts = new CancellationTokenSource(3000);
+                var resp = await _httpClient.GetAsync(testUrl, cts.Token);
+                if (resp.IsSuccessStatusCode)
+                {
+                    _cachedEndpoint = $"http://localhost:{port}";
+                    _logger.LogInformation("Discovered Foundry Local at {Endpoint} via port scan", _cachedEndpoint);
+                    return _cachedEndpoint;
+                }
+            }
+            catch { }
         }
 
         return "http://localhost:5272";

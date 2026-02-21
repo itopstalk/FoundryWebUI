@@ -63,14 +63,28 @@ Open `http://localhost:5207` in your browser.
 ### Deploy to IIS (production)
 
 ```powershell
-# Publish
-dotnet publish -c Release -o C:\inetpub\FoundryWebUI
-
-# Or use the automated installer (elevated PowerShell)
+# Use the automated installer (elevated PowerShell)
 .\Install-FoundryWebUI.ps1
+
+# Or publish manually
+dotnet publish -c Release -o C:\inetpub\FoundryWebUI
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step guide, including all prerequisite installation commands for a fresh Windows Server 2025.
+
+### Update an existing deployment
+
+After pulling the latest changes from Git, simply re-run the installer:
+
+```powershell
+git pull
+.\Install-FoundryWebUI.ps1
+```
+
+The script auto-detects existing installations and:
+- Skips prerequisite installation (IIS, .NET, Foundry, Ollama)
+- Stops the IIS site, rebuilds from source, and redeploys
+- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint overrides)
 
 ## API Endpoints
 

@@ -19,13 +19,35 @@ This guide walks through a complete deployment of FoundryWebUI on a **fresh Wind
 - [Step 9: Configure Windows Firewall](#step-9-configure-windows-firewall)
 - [Step 10: Verify the Deployment](#step-10-verify-the-deployment)
 - [Updating the Application](#updating-the-application)
+  - [Recommended: Use the installer script](#recommended-use-the-installer-script)
+  - [Manual update](#manual-update)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Automated Installation Script
 
-A PowerShell script that automates all prerequisite installation steps is provided at the bottom of this guide. See [Appendix: Automated Setup Script](#appendix-automated-setup-script). You can also find it in the project root as `Install-FoundryWebUI.ps1`.
+A PowerShell script (`Install-FoundryWebUI.ps1`) automates the entire installation and update process.
+
+**First run** — installs all prerequisites (IIS, .NET, Foundry Local, Ollama) and deploys the app.
+**Subsequent runs** — detects the existing installation, skips prerequisites, rebuilds from source, and redeploys while **preserving your `appsettings.json` customizations**.
+
+```powershell
+# First-time install (elevated PowerShell)
+.\Install-FoundryWebUI.ps1
+
+# Update after a git pull (elevated PowerShell)
+git pull
+.\Install-FoundryWebUI.ps1
+
+# Options:
+.\Install-FoundryWebUI.ps1 -SkipOllama              # Skip Ollama installation
+.\Install-FoundryWebUI.ps1 -Port 8080                # Use port 8080 instead of 80
+.\Install-FoundryWebUI.ps1 -SkipPrerequisites        # Skip all prereq checks (fast redeploy)
+.\Install-FoundryWebUI.ps1 -SourcePath "C:\Build"    # Deploy from a pre-built publish folder
+```
+
+See [Appendix: Automated Setup Script](#appendix-automated-setup-script) for full parameter reference.
 
 ---
 
@@ -341,8 +363,8 @@ Both should return `True`.
 ### Stop the Default Web Site (if using port 80)
 
 ```powershell
-Import-Module WebAdministration
-Stop-Website -Name "Default Web Site"
+$appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
+& $appcmd stop site "Default Web Site"
 ```
 
 ### Option A: Using IIS Manager (GUI)
@@ -356,34 +378,30 @@ Stop-Website -Name "Default Web Site"
    - **Binding**: `http`, port `80` (or your preferred port), hostname as needed.
 4. Click **OK**.
 
-### Option B: Using PowerShell (recommended for automation)
+### Option B: Using appcmd.exe (recommended for automation)
 
 ```powershell
-Import-Module WebAdministration
+$appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
 
 # Create the Application Pool
-New-WebAppPool -Name "FoundryWebUI"
-Set-ItemProperty "IIS:\AppPools\FoundryWebUI" -Name "managedRuntimeVersion" -Value ""
-Set-ItemProperty "IIS:\AppPools\FoundryWebUI" -Name "managedPipelineMode" -Value "Integrated"
+& $appcmd add apppool /name:"FoundryWebUI"
+& $appcmd set apppool "FoundryWebUI" /managedRuntimeVersion:""
+& $appcmd set apppool "FoundryWebUI" /managedPipelineMode:"Integrated"
 
 # Disable idle timeout (prevents app pool shutdown during inactivity)
-Set-ItemProperty "IIS:\AppPools\FoundryWebUI" -Name "processModel.idleTimeout" -Value "00:00:00"
+& $appcmd set apppool "FoundryWebUI" /processModel.idleTimeout:"00:00:00"
 
 # Enable AlwaysRunning start mode (reduces cold-start delays)
-Set-ItemProperty "IIS:\AppPools\FoundryWebUI" -Name "startMode" -Value "AlwaysRunning"
+& $appcmd set apppool "FoundryWebUI" /startMode:"AlwaysRunning"
 
 # Create the Website
-New-Website -Name "FoundryWebUI" `
-    -PhysicalPath "C:\inetpub\FoundryWebUI" `
-    -ApplicationPool "FoundryWebUI" `
-    -Port 80
+& $appcmd add site /name:"FoundryWebUI" /physicalPath:"C:\inetpub\FoundryWebUI" /bindings:"http/*:80:"
+& $appcmd set site "FoundryWebUI" /[path='/'].applicationPool:"FoundryWebUI"
 
-# If port 80 is already in use, use a different port:
-# New-Website -Name "FoundryWebUI" `
-#     -PhysicalPath "C:\inetpub\FoundryWebUI" `
-#     -ApplicationPool "FoundryWebUI" `
-#     -Port 8080
+# If port 80 is already in use, replace 80 above with your chosen port (e.g., 8080)
 ```
+
+> ⚠️ **Note**: The `WebAdministration` PowerShell module (`Import-Module WebAdministration`) and its `IIS:\` drive may not work reliably on Windows Server 2025. Use `appcmd.exe` or the IIS Manager GUI instead.
 
 ### Application Pool Settings Reference
 
@@ -528,25 +546,65 @@ Get-NetFirewallRule -DisplayName "FoundryWebUI*" | Format-Table Name, DisplayNam
 
 ## Updating the Application
 
+### Recommended: Use the installer script
+
+The easiest way to update is to `git pull` and re-run the installer. It automatically detects the existing deployment and performs an in-place update:
+
+```powershell
+# On the server, from your FoundryWebUI source directory
+cd C:\path\to\FoundryWebUI
+git pull
+.\Install-FoundryWebUI.ps1
+```
+
+**What the script does on update:**
+1. Detects that `C:\inetpub\FoundryWebUI\FoundryWebUI.dll` already exists → enters **update mode**
+2. Skips all prerequisite installation (IIS, .NET, Foundry Local, Ollama)
+3. Stops the IIS site and app pool
+4. Backs up your current `appsettings.json` (preserving endpoint overrides and other customizations)
+5. Rebuilds and republishes from source (`dotnet publish`)
+6. Restores your backed-up `appsettings.json`
+7. Restarts the IIS site
+
+> 💡 **Tip**: Use `-SkipPrerequisites` to skip even the prerequisite detection step for the fastest possible redeploy:
+> ```powershell
+> .\Install-FoundryWebUI.ps1 -SkipPrerequisites
+> ```
+
+### Manual update
+
+If you prefer to update manually:
+
 1. **Stop the site** (to unlock DLL files):
    ```powershell
-   Stop-Website -Name "FoundryWebUI"
-   Stop-WebAppPool -Name "FoundryWebUI"
+   $appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
+   & $appcmd stop site "FoundryWebUI"
+   & $appcmd stop apppool "FoundryWebUI"
    ```
 
-2. **Republish**:
+2. **Back up your settings**:
    ```powershell
-   cd C:\Projects\FoundryWebUI
+   Copy-Item C:\inetpub\FoundryWebUI\appsettings.json C:\inetpub\FoundryWebUI\appsettings.json.bak
+   ```
+
+3. **Republish**:
+   ```powershell
+   cd C:\path\to\FoundryWebUI
    dotnet publish -c Release -o C:\inetpub\FoundryWebUI
    ```
 
-3. **Restart**:
+4. **Restore your settings**:
    ```powershell
-   Start-WebAppPool -Name "FoundryWebUI"
-   Start-Website -Name "FoundryWebUI"
+   Copy-Item C:\inetpub\FoundryWebUI\appsettings.json.bak C:\inetpub\FoundryWebUI\appsettings.json
    ```
 
-> 💡 **Tip**: For zero-downtime updates, consider using the IIS `app_offline.htm` approach — place a file named `app_offline.htm` in the publish folder before copying new files, then delete it after the update.
+5. **Restart**:
+   ```powershell
+   & $appcmd start apppool "FoundryWebUI"
+   & $appcmd start site "FoundryWebUI"
+   ```
+
+> 💡 **Tip**: For zero-downtime updates, place a file named `app_offline.htm` in the publish folder before copying new files, then delete it after the update.
 
 ---
 
@@ -712,17 +770,46 @@ Get-WinEvent -LogName "Application" -MaxEvents 20 |
 
 ## Appendix: Automated Setup Script
 
-The following PowerShell script automates the entire installation process. Save it as `Install-FoundryWebUI.ps1` in the project root (it is already included with the project).
+The `Install-FoundryWebUI.ps1` script automates the entire installation and update process. It is included in the project root.
 
-**Usage**:
+### Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `-Port` | `80` | IIS website port |
+| `-SiteName` | `FoundryWebUI` | IIS site name |
+| `-AppPoolName` | `FoundryWebUI` | IIS application pool name |
+| `-InstallPath` | `C:\inetpub\FoundryWebUI` | Published application directory |
+| `-SourcePath` | *(empty)* | Path to a pre-built publish folder. If omitted, builds from the project in the script's directory |
+| `-SkipOllama` | `$false` | Skip Ollama installation |
+| `-SkipFirewall` | `$false` | Skip firewall rule creation |
+| `-FoundryEndpoint` | *(empty)* | Explicit Foundry Local endpoint URL (e.g., `http://localhost:5273`). Leave empty for auto-detection |
+| `-SkipPrerequisites` | `$false` | Skip all prerequisite checks. Use for fast redeployment when prerequisites are already installed |
+
+### Behavior
+
+- **Fresh install** (no existing deployment at `InstallPath`): Installs IIS, .NET, Foundry Local, Ollama, creates IIS site, and deploys the app.
+- **Update** (existing `FoundryWebUI.dll` found at `InstallPath`): Stops IIS site, backs up `appsettings.json`, rebuilds, restores settings, restarts site. Prerequisites are automatically skipped.
+
+### Usage Examples
+
 ```powershell
-# Run in an elevated PowerShell session
+# Full installation on a fresh server
 .\Install-FoundryWebUI.ps1
 
-# Options:
-.\Install-FoundryWebUI.ps1 -SkipOllama           # Skip Ollama installation
-.\Install-FoundryWebUI.ps1 -Port 8080             # Use port 8080 instead of 80
-.\Install-FoundryWebUI.ps1 -SourcePath "C:\Build"  # Path to pre-built publish output
-```
+# Update after git pull
+git pull
+.\Install-FoundryWebUI.ps1
 
-See `Install-FoundryWebUI.ps1` in the project root for the full script.
+# Fast redeploy (skip prereq checks)
+.\Install-FoundryWebUI.ps1 -SkipPrerequisites
+
+# Install on a custom port without Ollama
+.\Install-FoundryWebUI.ps1 -Port 8080 -SkipOllama
+
+# Deploy from a pre-built publish folder
+.\Install-FoundryWebUI.ps1 -SourcePath "C:\Build\FoundryWebUI"
+
+# Set explicit Foundry endpoint
+.\Install-FoundryWebUI.ps1 -FoundryEndpoint "http://localhost:5273"
+```

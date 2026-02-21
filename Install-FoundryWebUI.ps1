@@ -1,13 +1,17 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Automated setup script for FoundryWebUI on Windows Server 2025.
+    Automated setup and update script for FoundryWebUI on Windows Server 2025.
 
 .DESCRIPTION
     Installs all prerequisites and deploys FoundryWebUI as an IIS website.
-    Intended for a fresh Windows Server 2025 Desktop Experience installation.
+    Safe to re-run after a git pull — detects existing installations and only
+    rebuilds/redeploys the app, preserving your appsettings.json customizations.
 
-    Prerequisites installed:
+    On first run:  Installs IIS, .NET, Foundry Local, creates IIS site, etc.
+    On subsequent runs:  Stops IIS site, rebuilds from source, redeploys, restarts.
+
+    Prerequisites installed (first run only):
     - IIS with required features (WebSockets, compression, etc.)
     - .NET 8.0 Hosting Bundle
     - .NET 8.0 SDK (if building from source)
@@ -39,14 +43,20 @@
 .PARAMETER FoundryEndpoint
     Explicit Foundry Local endpoint URL. Leave empty for auto-detection.
 
+.PARAMETER SkipPrerequisites
+    Skip all prerequisite checks (WinGet, IIS, .NET, LLM providers).
+    Useful when you know prerequisites are already installed and just want to redeploy.
+
 .EXAMPLE
     .\Install-FoundryWebUI.ps1
+    # First run: full install. Subsequent runs: rebuild and redeploy only.
+
+.EXAMPLE
+    .\Install-FoundryWebUI.ps1 -SkipPrerequisites
+    # Fast update: just rebuild from source and redeploy.
 
 .EXAMPLE
     .\Install-FoundryWebUI.ps1 -Port 8080 -SkipOllama
-
-.EXAMPLE
-    .\Install-FoundryWebUI.ps1 -SourcePath "C:\Build\FoundryWebUI"
 #>
 
 [CmdletBinding()]
@@ -58,7 +68,8 @@ param(
     [string]$SourcePath = "",
     [switch]$SkipOllama,
     [switch]$SkipFirewall,
-    [string]$FoundryEndpoint = ""
+    [string]$FoundryEndpoint = "",
+    [switch]$SkipPrerequisites
 )
 
 $ErrorActionPreference = "Stop"
@@ -108,6 +119,30 @@ Write-Success "Running as Administrator"
 # Check OS
 $os = Get-CimInstance Win32_OperatingSystem
 Write-Info "Operating System: $($os.Caption) ($($os.Version))"
+
+# Detect if this is a fresh install or an update
+$appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
+$isUpdate = (Test-Path $InstallPath) -and (Test-Path "$InstallPath\FoundryWebUI.dll")
+$iisInstalled = Test-Path $appcmd
+
+if ($isUpdate) {
+    Write-Host ""
+    Write-Host "  ========================================" -ForegroundColor Magenta
+    Write-Host "  UPDATE MODE — Existing installation found" -ForegroundColor Magenta
+    Write-Host "  ========================================" -ForegroundColor Magenta
+    Write-Host "  Install path: $InstallPath" -ForegroundColor White
+    Write-Host ""
+    $SkipPrerequisites = $true
+} else {
+    Write-Info "Fresh installation detected"
+}
+
+# ============================================================
+# Steps 1-4: Prerequisites (skipped on update)
+# ============================================================
+if ($SkipPrerequisites) {
+    Write-Info "Skipping prerequisite installation (existing installation or -SkipPrerequisites)"
+} else {
 
 # ============================================================
 # Step 1: Verify WinGet
@@ -328,9 +363,28 @@ if (-not $SkipOllama) {
     Write-Info "Skipping Ollama installation (--SkipOllama specified)"
 }
 
+} # End of prerequisites block
+
 # ============================================================
-# Step 5: Build and publish the application
+# Step 5: Stop existing site, build, and publish
 # ============================================================
+if ($isUpdate) {
+    Write-Step "Stopping IIS site for update"
+    $appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
+    & $appcmd stop site $SiteName 2>$null
+    & $appcmd stop apppool $AppPoolName 2>$null
+    Start-Sleep -Seconds 2
+    Write-Success "Site stopped"
+}
+
+# Preserve existing appsettings.json before publish overwrites it
+$appSettingsBackup = $null
+$appSettingsPath = Join-Path $InstallPath "appsettings.json"
+if ($isUpdate -and (Test-Path $appSettingsPath)) {
+    Write-Info "Backing up existing appsettings.json"
+    $appSettingsBackup = Get-Content $appSettingsPath -Raw
+}
+
 Write-Step "Step 5: Publishing FoundryWebUI"
 
 if ($SourcePath) {
@@ -417,6 +471,14 @@ Write-Success "Website '$SiteName' created on port $Port"
 Write-Step "Step 7: Configuring application settings"
 
 $appSettingsPath = Join-Path $InstallPath "appsettings.json"
+
+# Restore backed-up appsettings.json (preserves user customizations across updates)
+if ($appSettingsBackup) {
+    Write-Info "Restoring previous appsettings.json (preserving your customizations)"
+    $appSettingsBackup | Set-Content $appSettingsPath -Encoding UTF8
+    Write-Success "appsettings.json restored from backup"
+}
+
 if (Test-Path $appSettingsPath) {
     if ($FoundryEndpoint) {
         Write-Info "Setting Foundry endpoint to $FoundryEndpoint"
@@ -520,18 +582,41 @@ try {
 # Summary
 # ============================================================
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Green
-Write-Host "  Installation Complete!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "  URL:          http://localhost:$Port" -ForegroundColor White
-Write-Host "  Install Path: $InstallPath" -ForegroundColor White
-Write-Host "  IIS Site:     $SiteName" -ForegroundColor White
-Write-Host "  App Pool:     $AppPoolName" -ForegroundColor White
-Write-Host ""
-Write-Host "  Next steps:" -ForegroundColor Yellow
-Write-Host "    1. Open http://localhost:$Port in a browser" -ForegroundColor Yellow
-Write-Host "    2. Check that provider status indicators are green" -ForegroundColor Yellow
-Write-Host "    3. Go to the Models page to download an LLM model" -ForegroundColor Yellow
-Write-Host "    4. Start chatting!" -ForegroundColor Yellow
-Write-Host ""
+if ($isUpdate) {
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "  Update Complete!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  URL:          http://localhost:$Port" -ForegroundColor White
+    Write-Host "  Install Path: $InstallPath" -ForegroundColor White
+    Write-Host "  IIS Site:     $SiteName" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Your appsettings.json customizations have been preserved." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  To update again later:" -ForegroundColor Yellow
+    Write-Host "    1. cd to your git repo folder" -ForegroundColor Yellow
+    Write-Host "    2. git pull" -ForegroundColor Yellow
+    Write-Host "    3. .\Install-FoundryWebUI.ps1" -ForegroundColor Yellow
+    Write-Host ""
+} else {
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host "  Installation Complete!" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  URL:          http://localhost:$Port" -ForegroundColor White
+    Write-Host "  Install Path: $InstallPath" -ForegroundColor White
+    Write-Host "  IIS Site:     $SiteName" -ForegroundColor White
+    Write-Host "  App Pool:     $AppPoolName" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Next steps:" -ForegroundColor Yellow
+    Write-Host "    1. Open http://localhost:$Port in a browser" -ForegroundColor Yellow
+    Write-Host "    2. Check that provider status indicators are green" -ForegroundColor Yellow
+    Write-Host "    3. Go to the Models page to download an LLM model" -ForegroundColor Yellow
+    Write-Host "    4. Start chatting!" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  To update later:" -ForegroundColor Cyan
+    Write-Host "    1. cd to your git repo folder" -ForegroundColor Cyan
+    Write-Host "    2. git pull" -ForegroundColor Cyan
+    Write-Host "    3. .\Install-FoundryWebUI.ps1" -ForegroundColor Cyan
+    Write-Host ""
+}
