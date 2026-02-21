@@ -276,10 +276,34 @@ if (Test-CommandExists "foundry") {
 if (Test-CommandExists "foundry") {
     Write-Info "Starting Foundry Local service..."
     try {
-        foundry service start 2>&1 | Out-Null
-        $status = foundry service status 2>&1
-        Write-Success "Foundry Local service running"
-        Write-Info "Status: $status"
+        # Use Start-Process with a timeout — foundry CLI commands can block indefinitely
+        $startProc = Start-Process -FilePath "foundry" -ArgumentList "service", "start" `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\foundry-start.log" `
+            -RedirectStandardError "$env:TEMP\foundry-start-err.log"
+        $exited = $startProc.WaitForExit(30000) # 30 second timeout
+        if (-not $exited) {
+            Write-Warning2 "'foundry service start' did not complete within 30s (service may already be running)."
+            try { $startProc.Kill() } catch { }
+        }
+
+        # Check status with a timeout
+        $statusProc = Start-Process -FilePath "foundry" -ArgumentList "service", "status" `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\foundry-status.log" `
+            -RedirectStandardError "$env:TEMP\foundry-status-err.log"
+        $exited = $statusProc.WaitForExit(15000) # 15 second timeout
+        if ($exited -and (Test-Path "$env:TEMP\foundry-status.log")) {
+            $status = Get-Content "$env:TEMP\foundry-status.log" -Raw
+            Write-Success "Foundry Local service running"
+            Write-Info "Status: $($status.Trim())"
+        } else {
+            if (-not $exited) { try { $statusProc.Kill() } catch { } }
+            Write-Warning2 "'foundry service status' timed out. The service may still be starting."
+            Write-Info "You can check manually later with: foundry service status"
+        }
+
+        # Clean up temp files
+        Remove-Item "$env:TEMP\foundry-start.log", "$env:TEMP\foundry-start-err.log",
+            "$env:TEMP\foundry-status.log", "$env:TEMP\foundry-status-err.log" -Force -ErrorAction SilentlyContinue
     } catch {
         Write-Warning2 "Could not start Foundry Local service: $_"
     }
