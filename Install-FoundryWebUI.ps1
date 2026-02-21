@@ -34,17 +34,17 @@
     Path to a pre-built publish folder. If omitted, the script builds from the project
     in the same directory as this script.
 
-.PARAMETER SkipOllama
-    Skip Ollama installation.
-
 .PARAMETER SkipFirewall
     Skip firewall rule creation.
 
 .PARAMETER FoundryEndpoint
     Explicit Foundry Local endpoint URL. Leave empty for auto-detection.
 
+.PARAMETER FoundryPort
+    The port to pin Foundry Local to. Default: 5273.
+
 .PARAMETER SkipPrerequisites
-    Skip all prerequisite checks (WinGet, IIS, .NET, LLM providers).
+    Skip all prerequisite checks (WinGet, IIS, .NET, Foundry Local).
     Useful when you know prerequisites are already installed and just want to redeploy.
 
 .EXAMPLE
@@ -56,7 +56,7 @@
     # Fast update: just rebuild from source and redeploy.
 
 .EXAMPLE
-    .\Install-FoundryWebUI.ps1 -Port 8080 -SkipOllama
+    .\Install-FoundryWebUI.ps1 -Port 8080
 #>
 
 [CmdletBinding()]
@@ -66,7 +66,6 @@ param(
     [string]$AppPoolName = "FoundryWebUI",
     [string]$InstallPath = "C:\inetpub\FoundryWebUI",
     [string]$SourcePath = "",
-    [switch]$SkipOllama,
     [switch]$SkipFirewall,
     [string]$FoundryEndpoint = "",
     [int]$FoundryPort = 5273,
@@ -362,25 +361,6 @@ if (Test-CommandExists "foundry") {
         $FoundryEndpoint = "http://localhost:$FoundryPort"
         Write-Info "Foundry endpoint will be set to $FoundryEndpoint in appsettings.json"
     }
-}
-
-if (-not $SkipOllama) {
-    Write-Step "Step 4b: Installing Ollama"
-
-    if (Test-CommandExists "ollama") {
-        Write-Success "Ollama already installed"
-    } else {
-        Write-Info "Installing Ollama via WinGet..."
-        winget install --id Ollama.Ollama --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-        if (Test-CommandExists "ollama") {
-            Write-Success "Ollama installed"
-        } else {
-            Write-Warning2 "Ollama installed but 'ollama' not found on PATH. You may need to open a new terminal."
-        }
-    }
-} else {
-    Write-Info "Skipping Ollama installation (--SkipOllama specified)"
 }
 
 } # End of prerequisites block

@@ -279,12 +279,18 @@ public class FoundryLocalService : ILlmProvider
     {
         var endpoint = await GetEndpointAsync();
 
-        // Load the model (GET /openai/load/{name})
+        // Load the model first (GET /openai/load/{name})
         try
         {
-            await _httpClient.GetAsync($"{endpoint}/openai/load/{Uri.EscapeDataString(request.Model)}", cancellationToken);
+            _logger.LogInformation("Loading model {Model} at {Endpoint}", request.Model, endpoint);
+            var loadResp = await _httpClient.GetAsync($"{endpoint}/openai/load/{Uri.EscapeDataString(request.Model)}", cancellationToken);
+            _logger.LogInformation("Model load response: {Status}", loadResp.StatusCode);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Model load request failed for {Model}", request.Model);
+            // Continue anyway — model might already be loaded
+        }
 
         var payload = new
         {
@@ -294,17 +300,27 @@ public class FoundryLocalService : ILlmProvider
             temperature = request.Temperature
         };
 
-        var jsonContent = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        var jsonStr = JsonSerializer.Serialize(payload);
+        _logger.LogInformation("Chat request to {Endpoint}/v1/chat/completions: {Payload}", endpoint, jsonStr);
+        var jsonContent = new StringContent(jsonStr, Encoding.UTF8, "application/json");
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/v1/chat/completions")
         {
             Content = jsonContent
         };
 
         using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("Chat completions returned {Status}: {Body}", response.StatusCode, errorBody);
+            yield return new ChatResponse { Content = $"Error from Foundry Local ({response.StatusCode}): {errorBody}", Done = true };
+            yield break;
+        }
 
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new System.IO.StreamReader(stream);
+        bool receivedAnyContent = false;
 
         while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
         {
@@ -315,21 +331,51 @@ public class FoundryLocalService : ILlmProvider
             var data = line["data: ".Length..];
             if (data == "[DONE]")
             {
-                yield return new ChatResponse { Done = true };
+                if (!receivedAnyContent)
+                    yield return new ChatResponse { Content = "(Model returned no content)", Done = true };
+                else
+                    yield return new ChatResponse { Done = true };
                 yield break;
             }
 
-            using var doc = JsonDocument.Parse(data);
-            var choices = doc.RootElement.GetProperty("choices");
-            foreach (var choice in choices.EnumerateArray())
+            JsonDocument? doc = null;
+            try { doc = JsonDocument.Parse(data); }
+            catch (Exception ex)
             {
-                if (choice.TryGetProperty("delta", out var delta) &&
-                    delta.TryGetProperty("content", out var content))
+                _logger.LogWarning("Failed to parse SSE chunk: {Data} — {Error}", data, ex.Message);
+                continue;
+            }
+
+            using (doc)
+            {
+                // Check for error responses in the SSE stream
+                if (doc.RootElement.TryGetProperty("error", out var errProp))
                 {
-                    yield return new ChatResponse { Content = content.GetString() ?? "" };
+                    var errMsg = errProp.ValueKind == JsonValueKind.String
+                        ? errProp.GetString()
+                        : errProp.TryGetProperty("message", out var em) ? em.GetString() : data;
+                    yield return new ChatResponse { Content = $"⚠️ {errMsg}", Done = true };
+                    yield break;
+                }
+
+                if (doc.RootElement.TryGetProperty("choices", out var choices))
+                {
+                    foreach (var choice in choices.EnumerateArray())
+                    {
+                        if (choice.TryGetProperty("delta", out var delta) &&
+                            delta.TryGetProperty("content", out var content))
+                        {
+                            var text = content.GetString() ?? "";
+                            if (text.Length > 0) receivedAnyContent = true;
+                            yield return new ChatResponse { Content = text };
+                        }
+                    }
                 }
             }
         }
+
+        if (!receivedAnyContent)
+            yield return new ChatResponse { Content = "(No response received from model — it may still be loading. Try again in a moment.)", Done = true };
     }
 
     public async IAsyncEnumerable<DownloadProgress> DownloadModelAsync(string modelId, [EnumeratorCancellation] CancellationToken cancellationToken = default)

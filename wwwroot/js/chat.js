@@ -5,7 +5,6 @@ const btnSend = document.getElementById('btn-send');
 const btnStop = document.getElementById('btn-stop');
 const btnNewChat = document.getElementById('btn-new-chat');
 const modelSelect = document.getElementById('model-select');
-const modelProvider = document.getElementById('model-provider');
 const sendText = document.getElementById('send-text');
 const sendSpinner = document.getElementById('send-spinner');
 
@@ -28,29 +27,18 @@ async function loadModels() {
         models.forEach(m => {
             const opt = document.createElement('option');
             opt.value = m.id;
-            opt.textContent = `${m.name} (${m.provider})`;
+            opt.textContent = m.name;
             opt.dataset.provider = m.provider;
             modelSelect.appendChild(opt);
         });
 
-        updateProviderBadge();
         btnSend.disabled = false;
     } catch (err) {
         modelSelect.innerHTML = '<option value="">Error loading models</option>';
     }
 }
 
-modelSelect.addEventListener('change', updateProviderBadge);
-
-function updateProviderBadge() {
-    const selected = modelSelect.selectedOptions[0];
-    if (selected && selected.dataset.provider) {
-        modelProvider.textContent = selected.dataset.provider;
-        modelProvider.className = `badge ${selected.dataset.provider === 'foundry' ? 'bg-info' : 'bg-warning'}`;
-    } else {
-        modelProvider.textContent = '';
-    }
-}
+modelSelect.addEventListener('change', () => {});
 
 // Render messages
 function renderMessages() {
@@ -103,7 +91,13 @@ async function sendMessage() {
     chatInput.value = '';
     setLoading(true);
 
+    // Show thinking indicator
+    const thinkingIdx = conversation.length - 1;
+    conversation[thinkingIdx].content = '⏳ Thinking...';
+    renderMessages();
+
     abortController = new AbortController();
+    let receivedContent = false;
 
     try {
         const res = await fetch(`/api/chat?provider=${provider}`, {
@@ -111,12 +105,21 @@ async function sendMessage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: modelSelect.value,
-                messages: conversation.slice(0, -1), // exclude empty assistant message
+                messages: conversation.slice(0, -1), // exclude assistant placeholder
                 stream: true,
                 temperature: 0.7
             }),
             signal: abortController.signal
         });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            conversation[thinkingIdx].content = `⚠️ HTTP ${res.status}: ${errText || res.statusText}`;
+            renderMessages();
+            setLoading(false);
+            abortController = null;
+            return;
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -134,19 +137,33 @@ async function sendMessage() {
                 if (line.startsWith('data: ')) {
                     try {
                         const data = JSON.parse(line.substring(6));
+                        // Clear thinking indicator on first real content
+                        if (!receivedContent) {
+                            conversation[thinkingIdx].content = '';
+                            receivedContent = true;
+                        }
+                        if (data.content) {
+                            conversation[thinkingIdx].content += data.content;
+                        }
                         if (data.error) {
-                            conversation[conversation.length - 1].content += `\n\n⚠️ Error: ${data.error}`;
-                        } else if (data.content) {
-                            conversation[conversation.length - 1].content += data.content;
+                            conversation[thinkingIdx].content += `\n\n⚠️ Error: ${data.error}`;
                         }
                         renderMessages();
-                    } catch { }
+                    } catch (parseErr) {
+                        console.warn('Failed to parse SSE data:', line, parseErr);
+                    }
                 }
             }
         }
+
+        // If we never received content, show a message
+        if (!receivedContent) {
+            conversation[thinkingIdx].content = '⚠️ No response received. The model may still be loading — try again in a moment.';
+            renderMessages();
+        }
     } catch (err) {
         if (err.name !== 'AbortError') {
-            conversation[conversation.length - 1].content += `\n\n⚠️ Error: ${err.message}`;
+            conversation[thinkingIdx].content = `⚠️ Error: ${err.message}`;
             renderMessages();
         }
     }

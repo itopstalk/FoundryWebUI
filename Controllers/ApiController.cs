@@ -100,7 +100,7 @@ public class ApiController : ControllerBase
         var p = GetProvider(provider);
         if (p == null)
         {
-            await WriteSSE("error", JsonSerializer.Serialize(new { error = $"Provider '{provider}' not found" }));
+            await WriteSSE("message", JsonSerializer.Serialize(new { content = $"⚠️ Provider '{provider}' not found", done = true }));
             return;
         }
 
@@ -115,8 +115,8 @@ public class ApiController : ControllerBase
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Chat error");
-            await WriteSSE("error", JsonSerializer.Serialize(new { error = ex.Message }));
+            _logger.LogError(ex, "Chat error with provider {Provider}", provider);
+            await WriteSSE("message", JsonSerializer.Serialize(new { content = $"\n\n⚠️ Error: {ex.Message}", done = true }));
         }
     }
 

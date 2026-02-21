@@ -6,15 +6,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorPages();
 builder.Services.AddControllers();
 
-// Register LLM providers
+// Register LLM provider
 builder.Services.AddHttpClient<FoundryLocalService>()
-    .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(10));
-builder.Services.AddHttpClient<OllamaService>()
     .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(10));
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     sp.GetRequiredService<FoundryLocalService>());
-builder.Services.AddSingleton<ILlmProvider>(sp =>
-    sp.GetRequiredService<OllamaService>());
 
 var app = builder.Build();
 

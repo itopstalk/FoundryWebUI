@@ -1,45 +1,43 @@
-// site.js - Global: check provider status on load and manage reconnect
+// site.js - Global: check Foundry Local status on load and manage reconnect
 
 async function checkProviderStatus() {
     try {
         const res = await fetch('/api/status');
         const statuses = await res.json();
+        const foundry = statuses.find(s => s.provider === 'foundry') || statuses[0];
 
-        // Update navbar badges
+        // Update navbar badge
         const container = document.getElementById('provider-status');
-        if (container) {
-            container.innerHTML = statuses.map(s =>
-                `<span class="badge ${s.isAvailable ? 'bg-success' : 'bg-danger'}" title="${s.error || s.endpoint || ''}">
-                    ${s.provider} ${s.isAvailable ? '✓' : '✗'}
-                </span>`
-            ).join('');
+        if (container && foundry) {
+            container.innerHTML = `<span class="badge ${foundry.isAvailable ? 'bg-success' : 'bg-danger'}" title="${foundry.error || foundry.endpoint || ''}">
+                foundry ${foundry.isAvailable ? '✓' : '✗'}
+            </span>`;
         }
 
-        // Update per-provider status indicators on the chat page
-        statuses.forEach(s => {
-            const indicator = document.getElementById(`${s.provider}-status-indicator`);
-            const endpointDisplay = document.getElementById(`${s.provider}-endpoint-display`);
+        // Update status indicator on the chat page
+        if (foundry) {
+            const indicator = document.getElementById('foundry-status-indicator');
+            const endpointDisplay = document.getElementById('foundry-endpoint-display');
 
             if (indicator) {
-                indicator.textContent = s.isAvailable ? 'Connected ✓' : 'Disconnected ✗';
-                indicator.className = `badge ${s.isAvailable ? 'bg-success' : 'bg-danger'}`;
+                indicator.textContent = foundry.isAvailable ? 'Connected ✓' : 'Disconnected ✗';
+                indicator.className = `badge ${foundry.isAvailable ? 'bg-success' : 'bg-danger'}`;
             }
             if (endpointDisplay) {
-                if (s.isAvailable && s.endpoint) {
-                    // Extract port from endpoint URL
+                if (foundry.isAvailable && foundry.endpoint) {
                     try {
-                        const url = new URL(s.endpoint);
-                        endpointDisplay.textContent = `Port ${url.port || '80'} — ${s.endpoint}`;
+                        const url = new URL(foundry.endpoint);
+                        endpointDisplay.textContent = `Port ${url.port || '80'} — ${foundry.endpoint}`;
                     } catch {
-                        endpointDisplay.textContent = s.endpoint;
+                        endpointDisplay.textContent = foundry.endpoint;
                     }
-                } else if (s.error) {
-                    endpointDisplay.textContent = s.error;
+                } else if (foundry.error) {
+                    endpointDisplay.textContent = foundry.error;
                 } else {
                     endpointDisplay.textContent = '';
                 }
             }
-        });
+        }
 
         return statuses;
     } catch {
@@ -84,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                // Refresh navbar badges and model list
+                // Refresh navbar badge and model list
                 await checkProviderStatus();
                 if (typeof loadModels === 'function') loadModels();
 
