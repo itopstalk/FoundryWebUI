@@ -176,9 +176,21 @@ public class FoundryLocalService : ILlmProvider
             _logger.LogDebug("Catalog JSON length: {Length}", json.Length);
             using var doc = JsonDocument.Parse(json);
 
-            // Response: { "models": [ { "name": "...", "displayName": "...", "alias": "...", "fileSizeMb": N, ... } ] }
+            // Response is either a plain array [...] or { "models": [...] }
             JsonElement modelsArray;
-            if (doc.RootElement.TryGetProperty("models", out modelsArray) && modelsArray.ValueKind == JsonValueKind.Array)
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                modelsArray = doc.RootElement;
+            }
+            else if (doc.RootElement.TryGetProperty("models", out var nested) && nested.ValueKind == JsonValueKind.Array)
+            {
+                modelsArray = nested;
+            }
+            else
+            {
+                _logger.LogWarning("Catalog response has unexpected format. Root kind: {Kind}", doc.RootElement.ValueKind);
+                return models;
+            }
             {
                 _catalogCache = new List<JsonElement>();
                 _logger.LogInformation("Catalog contains {Count} models", modelsArray.GetArrayLength());
@@ -211,10 +223,6 @@ public class FoundryLocalService : ILlmProvider
                         ParameterSize = deviceType
                     });
                 }
-            }
-            else
-            {
-                _logger.LogWarning("Catalog response has no 'models' array. Root kind: {Kind}", doc.RootElement.ValueKind);
             }
         }
         catch (Exception ex)
