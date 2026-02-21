@@ -13,4 +13,7 @@ public interface ILlmProvider
 
     /// <summary>Clears any cached endpoint and re-discovers the provider. Returns fresh status.</summary>
     Task<ProviderStatus> ReconnectAsync();
+
+    /// <summary>Deletes a downloaded model.</summary>
+    Task<bool> DeleteModelAsync(string modelId, CancellationToken cancellationToken = default);
 }

@@ -98,7 +98,7 @@ function renderModels() {
             <td>${m.parameterSize || '—'}</td>
             <td>
                 ${isAvailable ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadModel('${m.id}')">⬇️ Download</button>` : ''}
-                ${m.status === 'downloaded' || m.status === 'loaded' ? `<a href="/" class="btn btn-sm btn-outline-success">💬 Chat</a>` : ''}
+                ${m.status === 'downloaded' || m.status === 'loaded' ? `<a href="/" class="btn btn-sm btn-outline-success me-1">💬 Chat</a><button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${m.id}')">🗑️ Remove</button>` : ''}
             </td>
         </tr>`;
     }).join('');
@@ -166,9 +166,10 @@ async function downloadSelected() {
 
 async function startDownload(modelId) {
     downloadProgress.classList.remove('d-none');
+    downloadProgress.scrollIntoView({ behavior: 'smooth', block: 'start' });
     downloadBar.style.width = '0%';
     downloadBar.textContent = '0%';
-    downloadBar.classList.remove('bg-danger');
+    downloadBar.classList.remove('bg-danger', 'bg-success');
     downloadBar.classList.add('progress-bar-animated');
     downloadStatus.textContent = 'Starting download...';
     downloadModelName.textContent = `Downloading ${modelId}...`;
@@ -197,29 +198,35 @@ async function startDownload(modelId) {
                     if (line.startsWith('data: ')) {
                         try {
                             const data = JSON.parse(line.substring(6));
+                            console.log('Download progress:', data);
                             if (data.percent != null) {
                                 downloadBar.style.width = `${data.percent}%`;
                                 downloadBar.textContent = `${Math.round(data.percent)}%`;
                             }
-                            downloadStatus.textContent = data.status || '';
+                            if (data.status) {
+                                downloadStatus.textContent = data.status;
+                            }
 
                             if (data.status === 'complete' || data.status === 'success') {
                                 downloadBar.style.width = '100%';
                                 downloadBar.textContent = '100%';
                                 downloadBar.classList.remove('progress-bar-animated');
+                                downloadBar.classList.add('bg-success');
                                 downloadStatus.textContent = `✅ ${modelId} downloaded!`;
                             }
                             if (data.status && data.status.startsWith('error')) {
                                 downloadBar.classList.add('bg-danger');
+                                downloadBar.classList.remove('progress-bar-animated');
                                 downloadStatus.textContent = `❌ Failed: ${data.status}`;
                             }
-                        } catch { }
+                        } catch (e) { console.warn('Parse error:', line, e); }
                     }
                 }
             }
         } catch (err) {
             downloadStatus.textContent = `❌ Error: ${err.message}`;
             downloadBar.classList.add('bg-danger');
+            downloadBar.classList.remove('progress-bar-animated');
         }
 
         // Refresh model list and uncheck the downloaded model
@@ -228,12 +235,31 @@ async function startDownload(modelId) {
     });
 }
 
+// Delete a model
+async function deleteModel(modelId) {
+    if (!confirm(`Remove model "${modelId}"? This will delete the downloaded model files.`)) return;
+
+    try {
+        const res = await fetch(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+            alert(`✅ ${data.message}`);
+        } else {
+            alert(`❌ ${data.error || 'Failed to remove model'}`);
+        }
+    } catch (err) {
+        alert(`❌ Error: ${err.message}`);
+    }
+    await loadModels();
+}
+
 // Event listeners
 btnRefresh.addEventListener('click', loadModels);
 btnDownloadSelected.addEventListener('click', downloadSelected);
 
-// Make downloadModel available globally for inline onclick
+// Make functions available globally for inline onclick
 window.downloadModel = downloadModel;
+window.deleteModel = deleteModel;
 
 // Init
 loadModels();

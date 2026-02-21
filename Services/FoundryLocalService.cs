@@ -557,4 +557,44 @@ public class FoundryLocalService : ILlmProvider
 
         yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
     }
+
+    public async Task<bool> DeleteModelAsync(string modelId, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Deleting model {ModelId}", modelId);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "foundry",
+                Arguments = $"model remove \"{modelId}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process != null)
+            {
+                var outputTask = process.StandardOutput.ReadToEndAsync();
+                var errorTask = process.StandardError.ReadToEndAsync();
+                if (process.WaitForExit(60000))
+                {
+                    var output = await outputTask;
+                    var error = await errorTask;
+                    _logger.LogInformation("Model remove output: {Output} {Error}", output, error);
+                    return process.ExitCode == 0;
+                }
+                else
+                {
+                    try { process.Kill(); } catch { }
+                    _logger.LogWarning("Model remove timed out for {ModelId}", modelId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete model {ModelId}", modelId);
+        }
+        return false;
+    }
 }

@@ -161,6 +161,7 @@ public class ApiController : ControllerBase
         Response.ContentType = "text/event-stream";
         Response.Headers.CacheControl = "no-cache";
         Response.Headers.Connection = "keep-alive";
+        Response.Headers["X-Accel-Buffering"] = "no";
 
         var p = GetProvider(request.Provider);
         if (p == null)
@@ -182,6 +183,20 @@ public class ApiController : ControllerBase
             _logger.LogError(ex, "Download error");
             await WriteSSE("error", JsonSerializer.Serialize(new { error = ex.Message }));
         }
+    }
+
+    [HttpDelete("models/{modelId}")]
+    public async Task<IActionResult> DeleteModel(string modelId, [FromQuery] string provider = "foundry")
+    {
+        var p = GetProvider(provider);
+        if (p == null)
+            return NotFound(new { error = $"Provider '{provider}' not found" });
+
+        var success = await p.DeleteModelAsync(modelId, HttpContext.RequestAborted);
+        if (success)
+            return Ok(new { message = $"Model '{modelId}' removed successfully" });
+        else
+            return StatusCode(500, new { error = $"Failed to remove model '{modelId}'. Check server logs." });
     }
 
     private async Task WriteSSE(string eventType, string data)
