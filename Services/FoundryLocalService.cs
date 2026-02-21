@@ -498,25 +498,33 @@ public class FoundryLocalService : ILlmProvider
 
         // Foundry's download API starts the download in background and returns immediately.
         // We send the request, then poll /openai/models to detect when the model appears.
-        HttpResponseMessage? response = null;
+        bool requestSent = false;
         string? sendError = null;
         try
         {
-            response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-            var respBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogInformation("Download API response: {Status} — {Body}", response.StatusCode, respBody.Length > 500 ? respBody[..500] : respBody);
-        }
-        catch (HttpIOException ex) when (ex.Message.Contains("ResponseEnded"))
-        {
-            // Foundry may close the connection prematurely — this is OK, download is running
-            _logger.LogInformation("Download API connection closed (download started in background)");
+            // Use ResponseHeadersRead so we don't try to buffer the full body
+            var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            _logger.LogInformation("Download API response status: {Status}", response.StatusCode);
+            requestSent = true;
+            // Try to read body but don't fail if connection closes
+            try
+            {
+                var respBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("Download API body: {Body}", respBody.Length > 500 ? respBody[..500] : respBody);
+            }
+            catch (Exception bodyEx)
+            {
+                _logger.LogInformation("Download API body read failed (expected — download running in background): {Msg}", bodyEx.Message);
+            }
         }
         catch (Exception ex)
         {
-            sendError = ex.Message;
+            // Foundry often closes the connection prematurely — this is normal, download is running
+            _logger.LogInformation("Download API request exception (download may still be running): {Msg}", ex.Message);
+            requestSent = true; // Assume the request was received
         }
 
-        if (sendError != null)
+        if (!requestSent && sendError != null)
         {
             yield return new DownloadProgress { ModelId = modelId, Status = $"error: {sendError}" };
             yield break;
