@@ -74,7 +74,11 @@ public class ApiController : ControllerBase
 
                 // Merge: loaded/downloaded models take priority, then add catalog entries not yet downloaded
                 // Enrich downloaded models with catalog metadata (size, RAM estimates)
-                var catalogLookup = available.ToDictionary(m => m.Id, m => m, StringComparer.OrdinalIgnoreCase);
+                var catalogLookup = new Dictionary<string, ModelInfo>(StringComparer.OrdinalIgnoreCase);
+                foreach (var m in available)
+                {
+                    catalogLookup.TryAdd(m.Id, m);
+                }
                 var loadedIds = new HashSet<string>(loaded.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
                 foreach (var m in loaded)
                 {
