@@ -18,10 +18,14 @@
         </div>
 
         <!-- Model Selector -->
-        <div class="p-3 border-bottom d-flex align-items-center gap-3">
+        <div class="p-3 border-bottom d-flex align-items-center gap-3 flex-wrap">
             <label class="form-label mb-0 fw-bold">Model:</label>
             <select id="model-select" class="form-select form-select-sm" style="max-width: 350px;">
                 <option value="">Loading models...</option>
+            </select>
+            <label class="form-label mb-0 fw-bold ms-3">System Prompt:</label>
+            <select id="prompt-select" class="form-select form-select-sm" style="max-width: 250px;">
+                <option value="">None</option>
             </select>
             <button id="btn-new-chat" class="btn btn-sm btn-outline-light ms-auto">🗑️ New Chat</button>
         </div>

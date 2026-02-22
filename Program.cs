@@ -15,6 +15,9 @@ builder.Services.AddHttpClient<FoundryLocalService>()
 builder.Services.AddSingleton<ILlmProvider>(sp =>
     sp.GetRequiredService<FoundryLocalService>());
 
+// Register system prompt store
+builder.Services.AddSingleton<SystemPromptStore>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

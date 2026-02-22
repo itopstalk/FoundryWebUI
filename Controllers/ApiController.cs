@@ -12,15 +12,17 @@ public class ApiController : ControllerBase
 {
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly ILogger<ApiController> _logger;
+    private readonly SystemPromptStore _promptStore;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public ApiController(IEnumerable<ILlmProvider> providers, ILogger<ApiController> logger)
+    public ApiController(IEnumerable<ILlmProvider> providers, ILogger<ApiController> logger, SystemPromptStore promptStore)
     {
         _providers = providers;
         _logger = logger;
+        _promptStore = promptStore;
     }
 
     private ILlmProvider? GetProvider(string provider)
@@ -393,5 +395,64 @@ public class ApiController : ControllerBase
     {
         await Response.WriteAsync($"event: {eventType}\ndata: {data}\n\n");
         await Response.Body.FlushAsync();
+    }
+
+    // ============================================================
+    // System Prompts API
+    // ============================================================
+
+    [HttpGet("system-prompts")]
+    public IActionResult GetSystemPrompts()
+    {
+        return Ok(_promptStore.GetAll());
+    }
+
+    [HttpGet("system-prompts/{id}")]
+    public IActionResult GetSystemPrompt(string id)
+    {
+        var prompt = _promptStore.GetById(id);
+        if (prompt == null) return NotFound(new { error = "Prompt not found" });
+        return Ok(prompt);
+    }
+
+    [HttpPost("system-prompts")]
+    public IActionResult CreateSystemPrompt([FromBody] SystemPromptRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Content))
+            return BadRequest(new { error = "Name and content are required" });
+        var prompt = _promptStore.Add(request.Name.Trim(), request.Content.Trim());
+        return Ok(prompt);
+    }
+
+    [HttpPut("system-prompts/{id}")]
+    public IActionResult UpdateSystemPrompt(string id, [FromBody] SystemPromptRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Content))
+            return BadRequest(new { error = "Name and content are required" });
+        var prompt = _promptStore.Update(id, request.Name.Trim(), request.Content.Trim());
+        if (prompt == null) return NotFound(new { error = "Prompt not found" });
+        return Ok(prompt);
+    }
+
+    [HttpDelete("system-prompts/{id}")]
+    public IActionResult DeleteSystemPrompt(string id)
+    {
+        if (!_promptStore.Delete(id))
+            return NotFound(new { error = "Prompt not found" });
+        return Ok(new { message = "Deleted" });
+    }
+
+    [HttpPut("system-prompts/{id}/default")]
+    public IActionResult SetDefaultPrompt(string id)
+    {
+        if (!_promptStore.SetDefault(id))
+            return NotFound(new { error = "Prompt not found" });
+        return Ok(new { message = "Default updated" });
+    }
+
+    public class SystemPromptRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
     }
 }

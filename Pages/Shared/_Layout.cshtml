@@ -54,6 +54,11 @@
                             <span class="me-2">📋</span>Logs
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link @(ViewData["Title"]?.ToString() == "Settings" ? "active" : "")" asp-area="" asp-page="/Settings">
+                            <span class="me-2">⚙️</span>Settings
+                        </a>
+                    </li>
                 </ul>
             </div>
             <div class="p-2 border-top small text-muted text-center">

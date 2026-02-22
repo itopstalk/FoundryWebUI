@@ -5,6 +5,7 @@ const btnSend = document.getElementById('btn-send');
 const btnStop = document.getElementById('btn-stop');
 const btnNewChat = document.getElementById('btn-new-chat');
 const modelSelect = document.getElementById('model-select');
+const promptSelect = document.getElementById('prompt-select');
 const sendText = document.getElementById('send-text');
 const sendSpinner = document.getElementById('send-spinner');
 
@@ -36,6 +37,30 @@ async function loadModels() {
     } catch (err) {
         modelSelect.innerHTML = '<option value="">Error loading models</option>';
     }
+}
+
+// Load system prompts into selector
+async function loadSystemPrompts() {
+    try {
+        const res = await fetch('/api/system-prompts');
+        const prompts = await res.json();
+        promptSelect.innerHTML = '<option value="">None</option>';
+        prompts.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.name;
+            opt.dataset.content = p.content;
+            if (p.isDefault) opt.selected = true;
+            promptSelect.appendChild(opt);
+        });
+    } catch (err) {
+        console.warn('Failed to load system prompts:', err);
+    }
+}
+
+function getSystemPromptContent() {
+    const opt = promptSelect.selectedOptions[0];
+    return opt && opt.dataset.content ? opt.dataset.content : null;
 }
 
 modelSelect.addEventListener('change', () => {});
@@ -97,12 +122,18 @@ async function sendMessage() {
 
     try {
         console.log(`[chat] Sending to /api/chat?provider=${provider}, model=${modelSelect.value}`);
+        // Build messages array with optional system prompt
+        const chatMessages_arr = conversation.filter((m, i) => i < thinkingIdx).map(m => ({role: m.role, content: m.content}));
+        const sysPrompt = getSystemPromptContent();
+        if (sysPrompt) {
+            chatMessages_arr.unshift({ role: 'system', content: sysPrompt });
+        }
         const res = await fetch(`/api/chat?provider=${provider}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 model: modelSelect.value,
-                messages: conversation.filter((m, i) => i < thinkingIdx).map(m => ({role: m.role, content: m.content})),
+                messages: chatMessages_arr,
                 stream: true,
                 temperature: 0.7
             }),
@@ -210,3 +241,4 @@ chatInput.addEventListener('keydown', (e) => {
 
 // Init
 loadModels();
+loadSystemPrompts();

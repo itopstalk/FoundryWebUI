@@ -1,0 +1,55 @@
+@page
+@model FoundryWebUI.Pages.SettingsModel
+@{
+    ViewData["Title"] = "Settings";
+}
+
+<div class="d-flex flex-column h-100 p-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>⚙️ Settings</h3>
+    </div>
+
+    <!-- System Prompts -->
+    <div class="card flex-grow-1 overflow-hidden">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">System Prompts</h5>
+            <button id="btn-add-prompt" class="btn btn-sm btn-primary">➕ New Prompt</button>
+        </div>
+        <div class="card-body p-0 overflow-auto">
+            <div id="prompts-list" class="list-group list-group-flush">
+                <div class="text-center text-muted py-4">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prompt Editor Modal -->
+    <div class="modal fade" id="prompt-modal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="prompt-modal-title">New System Prompt</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="prompt-name" class="form-label fw-bold">Name</label>
+                        <input type="text" id="prompt-name" class="form-control" placeholder="e.g. Code Assistant, Translator, Summarizer" />
+                    </div>
+                    <div class="mb-3">
+                        <label for="prompt-content" class="form-label fw-bold">System Prompt</label>
+                        <textarea id="prompt-content" class="form-control" rows="8" placeholder="You are a helpful assistant that..."></textarea>
+                        <div class="form-text">This message is sent as the system role at the start of every conversation using this prompt.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" id="btn-save-prompt" class="btn btn-primary">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/settings.js" asp-append-version="true"></script>
+}
