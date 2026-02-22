@@ -397,7 +397,7 @@ if ($SourcePath) {
 } else {
     # Build from source — look for project in script directory
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $projectFile = Join-Path $scriptDir "FoundryLocalWebUI.csproj"
+    $projectFile = Join-Path $scriptDir "FoundryWebUI.csproj"
 
     if (-not (Test-Path $projectFile)) {
         throw "Project file not found at $projectFile. Use -SourcePath to specify a pre-built publish folder."
