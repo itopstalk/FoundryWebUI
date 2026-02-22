@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FoundryWebUI.Models;
 
 public class ChatMessage
@@ -12,6 +14,8 @@ public class ChatRequest
     public List<ChatMessage> Messages { get; set; } = new();
     public bool Stream { get; set; } = true;
     public double Temperature { get; set; } = 0.7;
+    [JsonPropertyName("max_tokens")]
+    public int? MaxTokens { get; set; }
 }
 
 public class ChatResponse

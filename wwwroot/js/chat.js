@@ -9,9 +9,18 @@ const promptSelect = document.getElementById('prompt-select');
 const sendText = document.getElementById('send-text');
 const sendSpinner = document.getElementById('send-spinner');
 const showThinkingToggle = document.getElementById('show-thinking');
+const maxTokensSlider = document.getElementById('max-tokens-slider');
+const maxTokensValue = document.getElementById('max-tokens-value');
 
 let conversation = [];
 let abortController = null;
+
+// Max tokens slider display
+if (maxTokensSlider) {
+    maxTokensSlider.addEventListener('input', () => {
+        maxTokensValue.textContent = maxTokensSlider.value;
+    });
+}
 
 // Thinking token patterns: content before the answer marker is "thinking"
 const THINKING_MARKERS = [
@@ -210,6 +219,7 @@ async function sendMessage() {
         if (sysPrompt) {
             chatMessages_arr.unshift({ role: 'system', content: sysPrompt });
         }
+        const maxTokens = maxTokensSlider ? parseInt(maxTokensSlider.value) : 4096;
         const res = await fetch(`/api/chat?provider=${provider}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -217,7 +227,8 @@ async function sendMessage() {
                 model: modelSelect.value,
                 messages: chatMessages_arr,
                 stream: true,
-                temperature: 0.7
+                temperature: 0.7,
+                max_tokens: maxTokens
             }),
             signal: abortController.signal
         });

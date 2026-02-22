@@ -284,15 +284,17 @@ public class FoundryLocalService : ILlmProvider
             _logger.LogWarning(ex, "Model load request failed for {Model}", request.Model);
         }
 
-        var payload = new
+        var payloadDict = new Dictionary<string, object>
         {
-            model = request.Model,
-            messages = request.Messages.Select(m => new { role = m.Role, content = m.Content }),
-            stream = true,
-            temperature = request.Temperature
+            ["model"] = request.Model,
+            ["messages"] = request.Messages.Select(m => new { role = m.Role, content = m.Content }).ToArray(),
+            ["stream"] = true,
+            ["temperature"] = request.Temperature
         };
+        if (request.MaxTokens.HasValue && request.MaxTokens.Value > 0)
+            payloadDict["max_tokens"] = request.MaxTokens.Value;
 
-        var jsonStr = JsonSerializer.Serialize(payload);
+        var jsonStr = JsonSerializer.Serialize(payloadDict);
         _logger.LogInformation("Chat request to {Endpoint}/v1/chat/completions", endpoint);
         var jsonContent = new StringContent(jsonStr, Encoding.UTF8, "application/json");
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/v1/chat/completions")
