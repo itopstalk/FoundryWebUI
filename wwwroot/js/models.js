@@ -273,7 +273,8 @@ async function startDownload(modelId) {
             downloadBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
         }
 
-        // Refresh model list and uncheck the downloaded model
+        // Refresh model list after a short delay to let Foundry register the new model
+        await new Promise(r => setTimeout(r, 1000));
         await loadModels();
         resolve();
     });
