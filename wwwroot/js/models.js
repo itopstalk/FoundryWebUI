@@ -11,6 +11,7 @@ const downloadModelName = document.getElementById('download-model-name');
 
 let allModels = [];
 let systemRamMb = null;
+let currentSort = { key: 'status', dir: 'asc' };
 
 function formatSize(bytes) {
     if (!bytes) return '—';
@@ -66,15 +67,48 @@ async function loadModels() {
     }
 }
 
+function getSortValue(m, key) {
+    switch (key) {
+        case 'name': return (m.name || m.id || '').toLowerCase();
+        case 'status': return { 'loaded': 0, 'downloaded': 1, 'available': 2 }[m.status] ?? 3;
+        case 'size': return m.size || 0;
+        case 'ram': return m.estimatedRamMb || 0;
+        case 'canRun': {
+            if (!m.estimatedRamMb || !systemRamMb) return 3;
+            const r = m.estimatedRamMb / systemRamMb;
+            return r <= 0.5 ? 0 : r <= 0.75 ? 1 : 2;
+        }
+        case 'device': return (m.parameterSize || '').toLowerCase();
+        default: return 0;
+    }
+}
+
+function sortModels(models) {
+    const { key, dir } = currentSort;
+    const mult = dir === 'asc' ? 1 : -1;
+    return [...models].sort((a, b) => {
+        const va = getSortValue(a, key);
+        const vb = getSortValue(b, key);
+        if (va < vb) return -1 * mult;
+        if (va > vb) return 1 * mult;
+        return 0;
+    });
+}
+
+function updateSortIndicators() {
+    document.querySelectorAll('th.sortable .sort-icon').forEach(icon => { icon.textContent = ''; });
+    const active = document.querySelector(`th.sortable[data-sort="${currentSort.key}"] .sort-icon`);
+    if (active) active.textContent = currentSort.dir === 'asc' ? ' ▲' : ' ▼';
+}
+
 function renderModels() {
     if (allModels.length === 0) {
         modelsTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No models found. Check Foundry Local connection.</td></tr>';
         return;
     }
 
-    // Sort: loaded first, then downloaded, then available
-    const order = { 'loaded': 0, 'downloaded': 1, 'available': 2 };
-    const sorted = [...allModels].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+    const sorted = sortModels(allModels);
+    updateSortIndicators();
 
     modelsTableBody.innerHTML = sorted.map(m => {
         const isAvailable = m.status === 'available';
@@ -266,6 +300,20 @@ async function deleteModel(modelId) {
 // Event listeners
 btnRefresh.addEventListener('click', loadModels);
 btnDownloadSelected.addEventListener('click', downloadSelected);
+
+// Column sort handlers
+document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+        const key = th.dataset.sort;
+        if (currentSort.key === key) {
+            currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.key = key;
+            currentSort.dir = 'asc';
+        }
+        renderModels();
+    });
+});
 
 // Make functions available globally for inline onclick
 window.downloadModel = downloadModel;
