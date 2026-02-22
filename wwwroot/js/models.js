@@ -276,6 +276,7 @@ async function startDownload(modelId) {
         // Refresh model list after a short delay to let Foundry register the new model
         await new Promise(r => setTimeout(r, 1000));
         await loadModels();
+        downloadProgress.classList.add('d-none');
         resolve();
     });
 }
