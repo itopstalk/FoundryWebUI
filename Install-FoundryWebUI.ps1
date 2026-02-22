@@ -1,11 +1,11 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Automated setup and update script for FoundryLocalWebUI on Windows Server 2025.
 
 .DESCRIPTION
     Installs all prerequisites and deploys FoundryLocalWebUI as an IIS website.
-    Safe to re-run after a git pull — detects existing installations and only
+    Safe to re-run after a git pull -- detects existing installations and only
     rebuilds/redeploys the app, preserving your appsettings.json customizations.
 
     On first run:  Installs IIS, .NET, Foundry Local, creates IIS site, etc.
@@ -85,17 +85,17 @@ function Write-Step {
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "  ✅ $Message" -ForegroundColor Green
+    Write-Host "  [OK] $Message" -ForegroundColor Green
 }
 
 function Write-Warning2 {
     param([string]$Message)
-    Write-Host "  ⚠️  $Message" -ForegroundColor Yellow
+    Write-Host "  [WARN] $Message" -ForegroundColor Yellow
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "  ℹ️  $Message" -ForegroundColor Gray
+    Write-Host "  [INFO] $Message" -ForegroundColor Gray
 }
 
 function Test-CommandExists {
@@ -128,7 +128,7 @@ $iisInstalled = Test-Path $appcmd
 if ($isUpdate) {
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Magenta
-    Write-Host "  UPDATE MODE — Existing installation found" -ForegroundColor Magenta
+    Write-Host "  UPDATE MODE -- Existing installation found" -ForegroundColor Magenta
     Write-Host "  ========================================" -ForegroundColor Magenta
     Write-Host "  Install path: $InstallPath" -ForegroundColor White
     Write-Host ""
@@ -323,7 +323,7 @@ if (Test-CommandExists "foundry") {
 
     Write-Info "Starting Foundry Local service..."
     try {
-        # Use Start-Process with a timeout — foundry CLI commands can block indefinitely
+        # Use Start-Process with a timeout -- foundry CLI commands can block indefinitely
         $startProc = Start-Process -FilePath "foundry" -ArgumentList "service", "start" `
             -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\foundry-start.log" `
             -RedirectStandardError "$env:TEMP\foundry-start-err.log"
@@ -395,7 +395,7 @@ if ($SourcePath) {
     New-Item -ItemType Directory -Path $InstallPath -Force | Out-Null
     Copy-Item -Path "$SourcePath\*" -Destination $InstallPath -Recurse -Force
 } else {
-    # Build from source — look for project in script directory
+    # Build from source -- look for project in script directory
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $projectFile = Join-Path $scriptDir "FoundryWebUI.csproj"
 
@@ -489,7 +489,7 @@ if (Test-Path $appSettingsPath) {
     } else {
         Write-Info "Foundry endpoint set to auto-detect (blank). Set explicitly if needed."
     }
-    # No CLI path needed — the app uses REST APIs for all Foundry interactions
+    # No CLI path needed -- the app uses REST APIs for all Foundry interactions
 } else {
     Write-Warning2 "appsettings.json not found at $appSettingsPath"
 }
@@ -549,7 +549,7 @@ try {
         Set-Acl $foundryCachePath $acl
         Write-Success "Write permission granted on Foundry cache: $foundryCachePath"
     } else {
-        Write-Warning2 "Could not find Foundry cache directory — model removal from UI may fail"
+        Write-Warning2 "Could not find Foundry cache directory -- model removal from UI may fail"
         $icaclsHint = 'After Foundry downloads a model, run: icacls <cache-path> /grant "IIS AppPool\' + $AppPoolName + ':(OI)(CI)F" /T'
         Write-Warning2 $icaclsHint
     }
@@ -601,7 +601,7 @@ try {
         Write-Warning2 "Site responded with HTTP $($response.StatusCode)"
     }
 } catch {
-    Write-Warning2 "Could not reach http://localhost:$Port — $($_.Exception.Message)"
+    Write-Warning2 "Could not reach http://localhost:$Port -- $($_.Exception.Message)"
     Write-Info "The site may need a moment to start. Try browsing to http://localhost:$Port manually."
 }
 
@@ -616,7 +616,7 @@ try {
         }
     }
 } catch {
-    Write-Warning2 "Could not reach API endpoint — $($_.Exception.Message)"
+    Write-Warning2 "Could not reach API endpoint -- $($_.Exception.Message)"
 }
 
 # ============================================================
