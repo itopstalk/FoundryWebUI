@@ -182,7 +182,7 @@ public class FoundryLocalService : ILlmProvider
 
                     models.Add(new ModelInfo
                     {
-                        Id = alias ?? name,
+                        Id = name,
                         Name = displayName,
                         Description = publisher != null ? $"by {publisher} ({deviceType})" : deviceType,
                         Size = sizeBytes,
