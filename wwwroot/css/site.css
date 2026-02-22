@@ -7,6 +7,9 @@ th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 th.sortable:hover { color: #6ea8fe; }
 th.sortable .sort-icon { font-size: 0.75em; opacity: 0.8; }
 
+/* Thinking content (reasoning models) */
+.thinking-content { font-size: 0.82em; color: #b0a060; line-height: 1.5; }
+
 @media (min-width: 768px) {
   html {
     font-size: 16px;

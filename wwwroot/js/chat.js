@@ -8,9 +8,35 @@ const modelSelect = document.getElementById('model-select');
 const promptSelect = document.getElementById('prompt-select');
 const sendText = document.getElementById('send-text');
 const sendSpinner = document.getElementById('send-spinner');
+const showThinkingToggle = document.getElementById('show-thinking');
 
 let conversation = [];
 let abortController = null;
+
+// Thinking token patterns: content before the answer marker is "thinking"
+const THINKING_MARKERS = [
+    { start: '<|channel|>analysis', end: '<|message|>' },
+    { start: '<think>', end: '</think>' }
+];
+
+function parseThinkingAndAnswer(text) {
+    for (const marker of THINKING_MARKERS) {
+        const startIdx = text.indexOf(marker.start);
+        if (startIdx === -1) continue;
+        const afterStart = startIdx + marker.start.length;
+        const endIdx = text.indexOf(marker.end, afterStart);
+        if (endIdx !== -1) {
+            const thinking = text.substring(afterStart, endIdx).trim();
+            const answer = text.substring(endIdx + marker.end.length).trim();
+            return { thinking, answer, hasThinking: true };
+        } else {
+            // Thinking started but answer not yet received — all content after marker is thinking-in-progress
+            const thinking = text.substring(afterStart).trim();
+            return { thinking, answer: '', hasThinking: true, thinkingInProgress: true };
+        }
+    }
+    return { thinking: '', answer: text, hasThinking: false };
+}
 
 // Load available models
 async function loadModels() {
@@ -20,7 +46,7 @@ async function loadModels() {
         modelSelect.innerHTML = '';
 
         if (models.length === 0) {
-            modelSelect.innerHTML = '<option value="">No models loaded — go to Models page</option>';
+            modelSelect.innerHTML = '<option value="">No models loaded -- go to Models page</option>';
             btnSend.disabled = true;
             return;
         }
@@ -76,24 +102,73 @@ function renderMessages() {
         return;
     }
 
+    const showThinking = showThinkingToggle && showThinkingToggle.checked;
+
     chatMessages.innerHTML = conversation.map((msg, i) => {
         const isUser = msg.role === 'user';
         const contextWarning = msg.contextExceeded
             ? `<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-flex align-items-center gap-2">
                  <span style="font-size:1.2em;">🚫</span>
-                 <span>Context limit reached — this model's token window is full. <strong>Start a new chat</strong> to continue.</span>
+                 <span>Context limit reached -- this model's token window is full. <strong>Start a new chat</strong> to continue.</span>
                </div>`
             : '';
-        return `
-            <div class="d-flex mb-3 ${isUser ? 'justify-content-end' : 'justify-content-start'}">
-                <div class="card ${isUser ? 'bg-primary text-white' : 'bg-body-secondary'}" style="max-width: 80%;">
-                    <div class="card-body py-2 px-3">
-                        <small class="fw-bold">${isUser ? 'You' : '🤖 Assistant'}</small>
-                        <div class="mt-1 message-content">${formatContent(msg.content)}</div>
-                        ${contextWarning}
+
+        if (isUser) {
+            return `
+                <div class="d-flex mb-3 justify-content-end">
+                    <div class="card bg-primary text-white" style="max-width: 80%;">
+                        <div class="card-body py-2 px-3">
+                            <small class="fw-bold">You</small>
+                            <div class="mt-1 message-content">${formatContent(msg.content)}</div>
+                        </div>
                     </div>
-                </div>
-            </div>`;
+                </div>`;
+        }
+
+        // Assistant message — parse thinking vs answer
+        const parsed = parseThinkingAndAnswer(msg.content);
+        let html = '';
+
+        if (parsed.hasThinking && showThinking && parsed.thinking) {
+            html += `
+                <div class="d-flex mb-2 justify-content-start">
+                    <div class="card border-secondary" style="max-width: 80%; opacity: 0.75;">
+                        <div class="card-body py-2 px-3">
+                            <small class="fw-bold text-warning">🧠 Assistant - Thinking</small>
+                            <div class="mt-1 message-content thinking-content">${formatContent(parsed.thinking)}</div>
+                            ${parsed.thinkingInProgress ? '<div class="text-warning small mt-1"><em>⏳ Still thinking...</em></div>' : ''}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        if (parsed.answer || !parsed.hasThinking) {
+            const displayContent = parsed.hasThinking ? parsed.answer : msg.content;
+            const label = parsed.hasThinking ? '🤖 Assistant - Answer' : '🤖 Assistant';
+            html += `
+                <div class="d-flex mb-3 justify-content-start">
+                    <div class="card bg-body-secondary" style="max-width: 80%;">
+                        <div class="card-body py-2 px-3">
+                            <small class="fw-bold">${label}</small>
+                            <div class="mt-1 message-content">${formatContent(displayContent)}</div>
+                            ${contextWarning}
+                        </div>
+                    </div>
+                </div>`;
+        } else if (parsed.hasThinking && !parsed.answer && !showThinking) {
+            // Thinking in progress but toggle is off — show a waiting indicator
+            html += `
+                <div class="d-flex mb-3 justify-content-start">
+                    <div class="card bg-body-secondary" style="max-width: 80%;">
+                        <div class="card-body py-2 px-3">
+                            <small class="fw-bold">🤖 Assistant</small>
+                            <div class="mt-1 message-content"><em>⏳ Thinking...</em></div>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        return html;
     }).join('');
 
     chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -171,14 +246,12 @@ async function sendMessage() {
             }
 
             const chunk = decoder.decode(value, { stream: true });
-            console.log('[chat] Raw chunk:', chunk);
             buffer += chunk;
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
 
             for (const line of lines) {
                 if (!line.trim()) continue;
-                console.log('[chat] Line:', line);
 
                 if (line.startsWith('data: ')) {
                     const dataStr = line.substring(6);
@@ -193,7 +266,7 @@ async function sendMessage() {
                         }
                         if (data.error) {
                             if (data.error === 'context_length_exceeded') {
-                                conversation[thinkingIdx].content += '\n\n⚠️ **Context limit reached** — The conversation is too long for this model. Start a new chat or use a model with a larger context window.';
+                                conversation[thinkingIdx].content += '\n\n⚠️ **Context limit reached** -- The conversation is too long for this model. Start a new chat or use a model with a larger context window.';
                                 conversation[thinkingIdx].contextExceeded = true;
                             } else {
                                 conversation[thinkingIdx].content += `\n\n⚠️ Error: ${data.error}`;
@@ -204,7 +277,6 @@ async function sendMessage() {
                         console.warn('[chat] Failed to parse:', dataStr, parseErr);
                     }
                 } else if (line.startsWith('event: ')) {
-                    // SSE event type line — skip, data is on next line
                     console.log('[chat] Event type:', line.substring(7));
                 }
             }
@@ -212,7 +284,7 @@ async function sendMessage() {
 
         if (!receivedContent) {
             console.warn('[chat] No content received from stream');
-            conversation[thinkingIdx].content = '⚠️ No response received. The model may still be loading — try again in a moment.';
+            conversation[thinkingIdx].content = '⚠️ No response received. The model may still be loading -- try again in a moment.';
             renderMessages();
         }
     } catch (err) {
@@ -250,6 +322,9 @@ chatInput.addEventListener('keydown', (e) => {
         sendMessage();
     }
 });
+if (showThinkingToggle) {
+    showThinkingToggle.addEventListener('change', renderMessages);
+}
 
 // Init
 loadModels();
