@@ -36,6 +36,7 @@ public class ModelInfo
     public string? ParameterSize { get; set; }
     public string? Family { get; set; }
     public double? EstimatedRamMb { get; set; }
+    public int? MaxOutputTokens { get; set; }
 }
 
 public class DownloadRequest

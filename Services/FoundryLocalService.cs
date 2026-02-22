@@ -180,6 +180,10 @@ public class FoundryLocalService : ILlmProvider
                     if (model.TryGetProperty("runtime", out var rt) && rt.TryGetProperty("deviceType", out var dt))
                         deviceType = dt.GetString() ?? "";
 
+                    int? maxOutputTokens = null;
+                    if (model.TryGetProperty("maxOutputTokens", out var mot) && mot.ValueKind == JsonValueKind.Number)
+                        maxOutputTokens = mot.GetInt32();
+
                     models.Add(new ModelInfo
                     {
                         Id = name,
@@ -187,6 +191,7 @@ public class FoundryLocalService : ILlmProvider
                         Description = publisher != null ? $"by {publisher} ({deviceType})" : deviceType,
                         Size = sizeBytes,
                         EstimatedRamMb = estimatedRamMb,
+                        MaxOutputTokens = maxOutputTokens,
                         Status = "available",
                         Provider = ProviderName,
                         Family = model.TryGetProperty("task", out var task) ? task.GetString() : null,

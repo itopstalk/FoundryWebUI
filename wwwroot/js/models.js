@@ -63,7 +63,7 @@ async function loadModels() {
         allModels = await modelsRes.json();
         renderModels();
     } catch (err) {
-        modelsTableBody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error loading models: ${err.message}</td></tr>`;
+        modelsTableBody.innerHTML = `<tr><td colspan="9" class="text-center text-danger">Error loading models: ${err.message}</td></tr>`;
     }
 }
 
@@ -79,6 +79,7 @@ function getSortValue(m, key) {
             return r <= 0.5 ? 0 : r <= 0.75 ? 1 : 2;
         }
         case 'device': return (m.parameterSize || '').toLowerCase();
+        case 'maxTokens': return m.maxOutputTokens || 0;
         default: return 0;
     }
 }
@@ -103,7 +104,7 @@ function updateSortIndicators() {
 
 function renderModels() {
     if (allModels.length === 0) {
-        modelsTableBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No models found. Check Foundry Local connection.</td></tr>';
+        modelsTableBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No models found. Check Foundry Local connection.</td></tr>';
         return;
     }
 
@@ -130,6 +131,7 @@ function renderModels() {
             <td>${formatRam(m.estimatedRamMb)}</td>
             <td>${canRunBadge(m.estimatedRamMb)}</td>
             <td>${m.parameterSize || '—'}</td>
+            <td>${m.maxOutputTokens ? m.maxOutputTokens.toLocaleString() : '—'}</td>
             <td>
                 ${isAvailable ? `<button class="btn btn-sm btn-outline-primary" onclick="downloadModel('${m.id}')">⬇️ Download</button>` : ''}
                 ${m.status === 'downloaded' || m.status === 'loaded' ? `<a href="/" class="btn btn-sm btn-outline-success me-1">💬 Chat</a><button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${m.id}')">🗑️ Remove</button>` : ''}
