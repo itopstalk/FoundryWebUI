@@ -321,10 +321,27 @@ public class FoundryLocalService : ILlmProvider
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new System.IO.StreamReader(stream);
         bool receivedAnyContent = false;
+        bool connectionClosed = false;
 
         while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(cancellationToken);
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Connection closed during chat stream");
+                connectionClosed = true;
+                break;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(ex, "HTTP error during chat stream");
+                connectionClosed = true;
+                break;
+            }
             if (string.IsNullOrEmpty(line)) continue;
 
             _logger.LogDebug("Stream line: {Line}", line);
@@ -411,7 +428,11 @@ public class FoundryLocalService : ILlmProvider
             }
         }
 
-        if (!receivedAnyContent)
+        if (connectionClosed)
+        {
+            yield return new ChatResponse { Content = "", Done = true, Error = "connection_closed" };
+        }
+        else if (!receivedAnyContent)
         {
             _logger.LogWarning("Chat stream ended with no content for model {Model}", request.Model);
             yield return new ChatResponse { Content = "⚠️ No response from model. Check IIS stdout logs for details.", Done = true };

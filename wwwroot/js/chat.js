@@ -14,6 +14,7 @@ const maxTokensValue = document.getElementById('max-tokens-value');
 
 let conversation = [];
 let abortController = null;
+let modelMaxTokens = {}; // modelId -> maxOutputTokens
 
 // Max tokens slider display
 if (maxTokensSlider) {
@@ -50,8 +51,21 @@ function parseThinkingAndAnswer(text) {
 // Load available models
 async function loadModels() {
     try {
-        const res = await fetch('/api/models/loaded');
-        const models = await res.json();
+        // Fetch loaded models and full catalog (for maxOutputTokens) in parallel
+        const [loadedRes, catalogRes] = await Promise.all([
+            fetch('/api/models/loaded'),
+            fetch('/api/models?provider=foundry')
+        ]);
+        const models = await loadedRes.json();
+
+        // Build maxTokens lookup from catalog
+        if (catalogRes.ok) {
+            const catalog = await catalogRes.json();
+            catalog.forEach(m => {
+                if (m.maxOutputTokens) modelMaxTokens[m.id] = m.maxOutputTokens;
+            });
+        }
+
         modelSelect.innerHTML = '';
 
         if (models.length === 0) {
@@ -69,10 +83,24 @@ async function loadModels() {
         });
 
         btnSend.disabled = false;
+        updateMaxTokensSlider();
     } catch (err) {
         modelSelect.innerHTML = '<option value="">Error loading models</option>';
     }
 }
+
+function updateMaxTokensSlider() {
+    if (!maxTokensSlider) return;
+    const selectedModel = modelSelect.value;
+    const limit = modelMaxTokens[selectedModel] || 2048;
+    maxTokensSlider.max = limit;
+    if (parseInt(maxTokensSlider.value) > limit) {
+        maxTokensSlider.value = limit;
+    }
+    maxTokensValue.textContent = maxTokensSlider.value;
+}
+
+modelSelect.addEventListener('change', updateMaxTokensSlider);
 
 // Load system prompts into selector
 async function loadSystemPrompts() {
@@ -97,8 +125,6 @@ function getSystemPromptContent() {
     const opt = promptSelect.selectedOptions[0];
     return opt && opt.dataset.content ? opt.dataset.content : null;
 }
-
-modelSelect.addEventListener('change', () => {});
 
 // Render messages
 function renderMessages() {
@@ -279,6 +305,8 @@ async function sendMessage() {
                             if (data.error === 'context_length_exceeded') {
                                 conversation[thinkingIdx].content += '\n\n⚠️ **Context limit reached** -- The conversation is too long for this model. Start a new chat or use a model with a larger context window.';
                                 conversation[thinkingIdx].contextExceeded = true;
+                            } else if (data.error === 'connection_closed') {
+                                conversation[thinkingIdx].content += '\n\n⚠️ **Connection lost** -- Foundry Local closed the connection. This usually means the max tokens setting exceeds the model\'s capacity. Try lowering Max Tokens.';
                             } else {
                                 conversation[thinkingIdx].content += `\n\n⚠️ Error: ${data.error}`;
                             }
