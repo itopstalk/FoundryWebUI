@@ -47,6 +47,22 @@ async function checkProviderStatus() {
     }
 }
 
+// Sidebar toggle
+document.addEventListener('DOMContentLoaded', () => {
+    const sidebar = document.getElementById('sidebar');
+    const toggleBtn = document.getElementById('sidebar-toggle');
+    if (toggleBtn && sidebar) {
+        // Restore state from localStorage
+        if (localStorage.getItem('sidebar-collapsed') === 'true') {
+            sidebar.classList.add('collapsed');
+        }
+        toggleBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+        });
+    }
+});
+
 // Reconnect handler
 document.addEventListener('DOMContentLoaded', () => {
     const btnReconnect = document.getElementById('btn-reconnect-foundry');

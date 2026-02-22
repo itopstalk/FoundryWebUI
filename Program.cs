@@ -2,6 +2,9 @@ using FoundryWebUI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Add in-memory log capture for the Logs UI
+builder.Logging.AddProvider(new InMemoryLoggerProvider());
+
 // Add services to the container.
 builder.Services.AddRazorPages();
 builder.Services.AddControllers();

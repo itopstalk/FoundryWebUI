@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using FoundryWebUI.Models;
 using FoundryWebUI.Services;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace FoundryWebUI.Controllers;
@@ -228,6 +229,164 @@ public class ApiController : ControllerBase
             _logger.LogError(ex, "Delete failed for {ModelId}", modelId);
             return StatusCode(500, new { error = $"Failed to remove model '{modelId}': {ex.Message}" });
         }
+    }
+
+    [HttpGet("logs/{source}")]
+    public IActionResult GetLogs(string source, [FromQuery] int lines = 500)
+    {
+        lines = Math.Clamp(lines, 10, 5000);
+        try
+        {
+            switch (source.ToLowerInvariant())
+            {
+                case "app":
+                    return Ok(GetAppLogs(lines));
+                case "iis":
+                    return Ok(GetIisStdoutLogs(lines));
+                case "foundry":
+                    return Ok(GetFoundryLogs(lines));
+                case "eventlog":
+                    return Ok(GetEventLogEntries(lines));
+                default:
+                    return BadRequest(new { error = $"Unknown log source: {source}" });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read logs for source {Source}", source);
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    private object GetAppLogs(int lines)
+    {
+        var entries = InMemoryLogStore.GetEntries(lines);
+        return new { source = "app", entries };
+    }
+
+    private object GetIisStdoutLogs(int lines)
+    {
+        var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+        if (!Directory.Exists(logDir))
+            logDir = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+
+        var logLines = new List<object>();
+        if (Directory.Exists(logDir))
+        {
+            var logFiles = Directory.GetFiles(logDir, "stdout*")
+                .OrderByDescending(f => System.IO.File.GetLastWriteTimeUtc(f))
+                .Take(3);
+
+            foreach (var file in logFiles)
+            {
+                try
+                {
+                    using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var reader = new StreamReader(fs);
+                    var content = reader.ReadToEnd();
+                    var fileLines = content.Split('\n');
+                    var fileName = Path.GetFileName(file);
+                    foreach (var line in fileLines.TakeLast(lines))
+                    {
+                        if (!string.IsNullOrWhiteSpace(line))
+                            logLines.Add(new { file = fileName, message = line.TrimEnd('\r') });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logLines.Add(new { file = Path.GetFileName(file), message = $"[Error reading: {ex.Message}]" });
+                }
+            }
+        }
+
+        return new { source = "iis", entries = logLines.TakeLast(lines), logDir };
+    }
+
+    private object GetFoundryLogs(int lines)
+    {
+        var logLines = new List<object>();
+        string? logDir = null;
+
+        var possiblePaths = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".foundry", "logs"),
+            @"C:\Users\Administrator\.foundry\logs",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FoundryLocal", "logs"),
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            if (Directory.Exists(path)) { logDir = path; break; }
+        }
+
+        if (logDir != null)
+        {
+            var logFiles = Directory.GetFiles(logDir, "*.log")
+                .Concat(Directory.GetFiles(logDir, "*.txt"))
+                .OrderByDescending(f => System.IO.File.GetLastWriteTimeUtc(f))
+                .Take(3);
+
+            foreach (var file in logFiles)
+            {
+                try
+                {
+                    using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    using var reader = new StreamReader(fs);
+                    var content = reader.ReadToEnd();
+                    var fileLines = content.Split('\n');
+                    var fileName = Path.GetFileName(file);
+                    foreach (var line in fileLines.TakeLast(lines))
+                    {
+                        if (!string.IsNullOrWhiteSpace(line))
+                            logLines.Add(new { file = fileName, message = line.TrimEnd('\r') });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logLines.Add(new { file = Path.GetFileName(file), message = $"[Error reading: {ex.Message}]" });
+                }
+            }
+        }
+
+        return new { source = "foundry", entries = logLines.TakeLast(lines), logDir = logDir ?? "(not found)" };
+    }
+
+    private object GetEventLogEntries(int lines)
+    {
+        var entries = new List<object>();
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                using var eventLog = new EventLog("Application");
+                var relevantEntries = eventLog.Entries.Cast<EventLogEntry>()
+                    .Where(e => e.Source != null && (
+                        e.Source.Contains("IIS", StringComparison.OrdinalIgnoreCase) ||
+                        e.Source.Contains("ASP.NET", StringComparison.OrdinalIgnoreCase) ||
+                        e.Source.Contains(".NET Runtime", StringComparison.OrdinalIgnoreCase) ||
+                        e.Source.Contains("Foundry", StringComparison.OrdinalIgnoreCase) ||
+                        e.Source.Contains("W3SVC", StringComparison.OrdinalIgnoreCase) ||
+                        e.Source.Contains("WAS", StringComparison.OrdinalIgnoreCase)))
+                    .OrderByDescending(e => e.TimeGenerated)
+                    .Take(lines);
+
+                foreach (var entry in relevantEntries)
+                {
+                    entries.Add(new
+                    {
+                        time = entry.TimeGenerated.ToString("yyyy-MM-dd HH:mm:ss"),
+                        source = entry.Source,
+                        level = entry.EntryType.ToString().ToLower(),
+                        message = entry.Message?.Length > 2000 ? entry.Message[..2000] + "..." : entry.Message
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            entries.Add(new { time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), source = "FoundryWebUI", level = "error", message = $"Cannot read Event Log: {ex.Message}" });
+        }
+        return new { source = "eventlog", entries };
     }
 
     private async Task WriteSSE(string eventType, string data)

@@ -4,7 +4,7 @@
     ViewData["Title"] = "Models";
 }
 
-<div class="p-3">
+<div class="d-flex flex-column h-100 p-3">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h3>📦 Model Management</h3>
         <div class="d-flex gap-2">
@@ -26,8 +26,8 @@
     </div>
 
     <!-- Models Table -->
-    <div class="card">
-        <div class="card-body p-0" style="max-height: calc(100vh - 220px); overflow-y: auto;">
+    <div class="card flex-grow-1 overflow-hidden">
+        <div class="card-body p-0 overflow-auto">
             <table class="table table-hover mb-0">
                 <thead class="sticky-top" style="background: var(--bs-body-bg); z-index: 1;">
                     <tr>

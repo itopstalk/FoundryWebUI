@@ -1,0 +1,65 @@
+@page
+@model FoundryWebUI.Pages.LogsModel
+@{
+    ViewData["Title"] = "Logs";
+}
+
+<div class="d-flex flex-column h-100 p-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>📋 Logs</h3>
+        <div class="d-flex gap-2">
+            <button id="btn-refresh-logs" class="btn btn-sm btn-outline-light">🔄 Refresh</button>
+            <button id="btn-auto-scroll" class="btn btn-sm btn-outline-info active" title="Auto-scroll to bottom">⬇️ Auto-scroll</button>
+        </div>
+    </div>
+
+    <!-- Log Source Tabs -->
+    <ul class="nav nav-tabs mb-3" id="log-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-tab-btn nav-link active" data-source="app" type="button" role="tab">
+                🖥️ Application
+                <span id="app-count" class="badge bg-secondary ms-1 small">0</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-tab-btn nav-link" data-source="iis" type="button" role="tab">
+                🌐 IIS Stdout
+                <span id="iis-count" class="badge bg-secondary ms-1 small">0</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-tab-btn nav-link" data-source="foundry" type="button" role="tab">
+                🤖 Foundry Local
+                <span id="foundry-count" class="badge bg-secondary ms-1 small">0</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-tab-btn nav-link" data-source="eventlog" type="button" role="tab">
+                📰 Event Log
+                <span id="eventlog-count" class="badge bg-secondary ms-1 small">0</span>
+            </button>
+        </li>
+    </ul>
+
+    <!-- Filters -->
+    <div class="d-flex gap-2 mb-2 align-items-center">
+        <select id="log-level-filter" class="form-select form-select-sm" style="width: auto;">
+            <option value="all">All Levels</option>
+            <option value="error">Errors Only</option>
+            <option value="warn">Warnings+</option>
+            <option value="info" selected>Info+</option>
+            <option value="debug">Debug (All)</option>
+        </select>
+        <input type="text" id="log-search" class="form-control form-control-sm" style="max-width: 300px;" placeholder="Search logs..." />
+        <span id="log-showing" class="text-muted small ms-auto"></span>
+    </div>
+
+    <!-- Log Content -->
+    <div id="log-viewer" class="log-viewer flex-grow-1">
+        <div class="text-center text-muted p-4">Loading logs...</div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/logs.js" asp-append-version="true"></script>
+}

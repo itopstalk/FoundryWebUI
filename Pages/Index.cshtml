@@ -4,9 +4,7 @@
     ViewData["Title"] = "Chat";
 }
 
-<div class="row g-0" style="height: calc(100vh - 70px);">
-    <!-- Chat Area -->
-    <div class="col d-flex flex-column">
+<div class="d-flex flex-column h-100">
         <!-- Provider Status Panel -->
         <div id="foundry-status-panel" class="p-2 border-bottom d-flex align-items-center gap-3" style="font-size: 0.85rem;">
             <div class="d-flex align-items-center gap-2">
@@ -48,7 +46,6 @@
                 <button id="btn-stop" class="btn btn-danger d-none">Stop</button>
             </div>
         </div>
-    </div>
 </div>
 
 @section Scripts {

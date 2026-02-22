@@ -9,42 +9,60 @@
     <link rel="stylesheet" href="~/FoundryWebUI.styles.css" asp-append-version="true" />
 </head>
 <body>
+    <!-- Top navbar -->
     <header>
-        <nav class="navbar navbar-expand-sm border-bottom shadow-sm">
-            <div class="container-fluid">
-                <a class="navbar-brand fw-bold" asp-area="" asp-page="/Index">
-                    <span class="me-2">🤖</span>FoundryWebUI
+        <nav class="navbar border-bottom shadow-sm px-3" style="height: 48px;">
+            <div class="d-flex align-items-center w-100">
+                <button id="sidebar-toggle" class="btn btn-sm btn-outline-secondary me-2 d-flex align-items-center" title="Toggle sidebar">
+                    <span style="font-size:1.2rem;">☰</span>
+                </button>
+                <a class="navbar-brand fw-bold mb-0" asp-area="" asp-page="/Index">
+                    <span class="me-1">🤖</span>FoundryWebUI
                 </a>
-                <a class="navbar-text text-muted small text-decoration-none me-auto ms-2 d-none d-md-inline"
+                <a class="text-muted small text-decoration-none ms-2 d-none d-md-inline"
                    href="https://github.com/itopstalk/FoundryWebUI" target="_blank" rel="noopener"
                    title="View on GitHub">
                     <span class="opacity-75">📂 github.com/itopstalk/FoundryWebUI</span>
                 </a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse"
-                        aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/Index">💬 Chat</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" asp-area="" asp-page="/Models">📦 Models</a>
-                        </li>
-                    </ul>
-                    <div id="provider-status" class="d-flex align-items-center gap-2">
-                        <span id="foundry-nav-status" class="d-inline-flex align-items-center gap-1" title="Checking...">
-                            <span id="foundry-nav-light" style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#6c757d;"></span>
-                            <span class="small fw-semibold">Foundry Local Connection</span>
-                        </span>
-                    </div>
+                <div class="ms-auto d-flex align-items-center gap-2">
+                    <span id="foundry-nav-status" class="d-inline-flex align-items-center gap-1" title="Checking...">
+                        <span id="foundry-nav-light" style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#6c757d;"></span>
+                        <span class="small fw-semibold">Foundry Local Connection</span>
+                    </span>
                 </div>
             </div>
         </nav>
     </header>
-    <div class="container-fluid">
-        <main role="main" class="pb-3">
+
+    <div class="d-flex" style="height: calc(100vh - 48px);">
+        <!-- Sidebar -->
+        <nav id="sidebar" class="border-end d-flex flex-column" style="width: 220px; min-width: 220px; background: var(--bs-body-bg); transition: margin-left 0.2s;">
+            <div class="p-2 flex-grow-1">
+                <ul class="nav nav-pills flex-column gap-1">
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link @(ViewData["Title"]?.ToString() == "Chat" ? "active" : "")" asp-area="" asp-page="/Index">
+                            <span class="me-2">💬</span>Chat
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link @(ViewData["Title"]?.ToString() == "Models" ? "active" : "")" asp-area="" asp-page="/Models">
+                            <span class="me-2">📦</span>Models
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link sidebar-link @(ViewData["Title"]?.ToString() == "Logs" ? "active" : "")" asp-area="" asp-page="/Logs">
+                            <span class="me-2">📋</span>Logs
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            <div class="p-2 border-top small text-muted text-center">
+                FoundryWebUI v1.0
+            </div>
+        </nav>
+
+        <!-- Main content -->
+        <main role="main" class="flex-grow-1 overflow-hidden">
             @RenderBody()
         </main>
     </div>
