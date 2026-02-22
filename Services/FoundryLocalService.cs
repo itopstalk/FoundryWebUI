@@ -610,9 +610,12 @@ public class FoundryLocalService : ILlmProvider
 
         if (string.IsNullOrEmpty(modelDirPath) || !Directory.Exists(modelDirPath))
         {
-            _logger.LogError("Cannot determine model cache directory (modelDirPath={Path})", modelDirPath);
+            _logger.LogError("Cannot determine model cache directory (modelDirPath={Path}, exists={Exists})", 
+                modelDirPath, modelDirPath != null && Directory.Exists(modelDirPath));
             return false;
         }
+
+        _logger.LogInformation("Model cache directory: {Path}", modelDirPath);
 
         // Step 3: Find and delete the model directory
         // Model directories follow pattern: {modelDirPath}/{Publisher}/{ModelName-Version}
@@ -620,9 +623,34 @@ public class FoundryLocalService : ILlmProvider
         var dirName = modelId.Replace(':', '-');
         bool deleted = false;
 
+        // Log what's actually in the cache directory for debugging
+        try
+        {
+            foreach (var pubDir in Directory.GetDirectories(modelDirPath))
+            {
+                _logger.LogInformation("  Publisher dir: {Dir}", pubDir);
+                foreach (var modelDir2 in Directory.GetDirectories(pubDir))
+                {
+                    _logger.LogInformation("    Model dir: {Dir}", Path.GetFileName(modelDir2));
+                }
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "Permission denied accessing cache directory {Path}. Grant the IIS app pool identity access: icacls \"{Path}\" /grant \"IIS AppPool\\FoundryWebUI:(OI)(CI)F\" /T", modelDirPath, modelDirPath);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cannot enumerate cache directory (permission issue?)");
+        }
+
+        _logger.LogInformation("Looking for directory named '{DirName}' in publisher subdirectories", dirName);
+
         foreach (var publisherDir in Directory.GetDirectories(modelDirPath))
         {
             var modelDir = Path.Combine(publisherDir, dirName);
+            _logger.LogInformation("Checking: {Path} (exists={Exists})", modelDir, Directory.Exists(modelDir));
             if (Directory.Exists(modelDir))
             {
                 try

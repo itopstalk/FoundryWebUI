@@ -204,18 +204,30 @@ public class ApiController : ControllerBase
         }
     }
 
-    [HttpDelete("models/{modelId}")]
+    [HttpDelete("models/{**modelId}")]
     public async Task<IActionResult> DeleteModel(string modelId, [FromQuery] string provider = "foundry")
     {
+        // URL-decode the model ID (may contain colons like "Phi-3-mini-4k-instruct-generic-cpu:2")
+        modelId = Uri.UnescapeDataString(modelId);
+        _logger.LogInformation("Delete request for model: {ModelId}", modelId);
+
         var p = GetProvider(provider);
         if (p == null)
             return NotFound(new { error = $"Provider '{provider}' not found" });
 
-        var success = await p.DeleteModelAsync(modelId, HttpContext.RequestAborted);
-        if (success)
-            return Ok(new { message = $"Model '{modelId}' removed successfully" });
-        else
-            return StatusCode(500, new { error = $"Failed to remove model '{modelId}'. Check server logs." });
+        try
+        {
+            var success = await p.DeleteModelAsync(modelId, HttpContext.RequestAborted);
+            if (success)
+                return Ok(new { message = $"Model '{modelId}' removed successfully" });
+            else
+                return StatusCode(500, new { error = $"Failed to remove model '{modelId}'. The IIS app pool may not have write access to the Foundry cache directory. Check server logs for details." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Delete failed for {ModelId}", modelId);
+            return StatusCode(500, new { error = $"Failed to remove model '{modelId}': {ex.Message}" });
+        }
     }
 
     private async Task WriteSSE(string eventType, string data)

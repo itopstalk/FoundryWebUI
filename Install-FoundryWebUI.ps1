@@ -517,6 +517,45 @@ $acl.SetAccessRule($rule)
 Set-Acl $logsPath $acl
 Write-Success "Write permission granted on logs folder"
 
+# Write access to Foundry Local cache directory (needed for model removal via REST)
+try {
+    $foundryCachePath = $null
+    # Try to get the cache path from the Foundry service
+    $foundryEndpoint = if ($FoundryEndpoint) { $FoundryEndpoint } else { "http://localhost:$FoundryPort" }
+    try {
+        $statusResp = Invoke-RestMethod "$foundryEndpoint/openai/status" -TimeoutSec 5 -ErrorAction Stop
+        if ($statusResp.ModelDirPath -or $statusResp.modelDirPath) {
+            $foundryCachePath = if ($statusResp.ModelDirPath) { $statusResp.ModelDirPath } else { $statusResp.modelDirPath }
+        }
+    } catch {
+        Write-Info "Could not query Foundry status for cache path, checking common locations..."
+    }
+    # Fallback: check common cache locations
+    if (-not $foundryCachePath -or -not (Test-Path $foundryCachePath)) {
+        $possibleCachePaths = @(
+            "$env:USERPROFILE\.foundry\cache\models",
+            "C:\Users\Administrator\.foundry\cache\models",
+            "$env:LOCALAPPDATA\.foundry\cache\models"
+        )
+        foreach ($p in $possibleCachePaths) {
+            if (Test-Path $p) { $foundryCachePath = $p; break }
+        }
+    }
+    if ($foundryCachePath -and (Test-Path $foundryCachePath)) {
+        $acl = Get-Acl $foundryCachePath
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "IIS AppPool\$AppPoolName", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+        $acl.SetAccessRule($rule)
+        Set-Acl $foundryCachePath $acl
+        Write-Success "Write permission granted on Foundry cache: $foundryCachePath"
+    } else {
+        Write-Warning2 "Could not find Foundry cache directory — model removal from UI may fail"
+        Write-Warning2 "After Foundry downloads a model, run: icacls <cache-path> /grant `"IIS AppPool\$AppPoolName`:(OI)(CI)F`" /T"
+    }
+} catch {
+    Write-Warning2 "Failed to set Foundry cache permissions: $_"
+}
+
 # ============================================================
 # Step 9: Configure firewall
 # ============================================================
