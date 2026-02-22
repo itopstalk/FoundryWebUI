@@ -385,6 +385,14 @@ if ($isUpdate -and (Test-Path $appSettingsPath)) {
     $appSettingsBackup = Get-Content $appSettingsPath -Raw
 }
 
+# Preserve existing system-prompts.json (user-created system prompts)
+$systemPromptsBackup = $null
+$systemPromptsPath = Join-Path $InstallPath "system-prompts.json"
+if ($isUpdate -and (Test-Path $systemPromptsPath)) {
+    Write-Info "Backing up existing system-prompts.json"
+    $systemPromptsBackup = Get-Content $systemPromptsPath -Raw
+}
+
 Write-Step "Step 5: Publishing FoundryLocalWebUI"
 
 if ($SourcePath) {
@@ -477,6 +485,14 @@ if ($appSettingsBackup) {
     Write-Info "Restoring previous appsettings.json (preserving your customizations)"
     $appSettingsBackup | Set-Content $appSettingsPath -Encoding UTF8
     Write-Success "appsettings.json restored from backup"
+}
+
+# Restore backed-up system-prompts.json
+$systemPromptsPath = Join-Path $InstallPath "system-prompts.json"
+if ($systemPromptsBackup) {
+    Write-Info "Restoring previous system-prompts.json (preserving your system prompts)"
+    $systemPromptsBackup | Set-Content $systemPromptsPath -Encoding UTF8
+    Write-Success "system-prompts.json restored from backup"
 }
 
 if (Test-Path $appSettingsPath) {
