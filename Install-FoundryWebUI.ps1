@@ -487,52 +487,9 @@ if (Test-Path $appSettingsPath) {
         $settings | ConvertTo-Json -Depth 10 | Set-Content $appSettingsPath -Encoding UTF8
         Write-Success "Foundry endpoint configured"
     } else {
-        Write-Info "Foundry endpoint set to auto-detect (blank). Set explicitly if IIS cannot run 'foundry' CLI."
+        Write-Info "Foundry endpoint set to auto-detect (blank). Set explicitly if needed."
     }
-
-    # Auto-detect and set the Foundry CLI path for IIS
-    $foundryCliPath = $null
-    $foundryWhere = Get-Command foundry -ErrorAction SilentlyContinue
-    if ($foundryWhere) {
-        $foundryCliPath = $foundryWhere.Source
-    }
-    # Also check the real winget package location
-    if (-not $foundryCliPath -or -not (Test-Path $foundryCliPath)) {
-        $possiblePaths = @(
-            "$env:LOCALAPPDATA\Microsoft\WindowsApps\foundry.exe",
-            "$env:LOCALAPPDATA\Microsoft\WinGet\Links\foundry.exe",
-            "$env:USERPROFILE\.foundry\bin\foundry.exe"
-        )
-        foreach ($p in $possiblePaths) {
-            if (Test-Path $p) { $foundryCliPath = $p; break }
-        }
-    }
-    # Try to resolve the actual target if it's a Windows App Execution Alias
-    if ($foundryCliPath -and (Test-Path $foundryCliPath)) {
-        # winget packages are typically in WindowsApps — find the real exe
-        try {
-            $realTarget = (Get-Item $foundryCliPath -ErrorAction SilentlyContinue).Target
-            if ($realTarget -and (Test-Path $realTarget)) {
-                $foundryCliPath = $realTarget
-                Write-Info "Resolved foundry symlink to: $foundryCliPath"
-            }
-        } catch {}
-    }
-
-    if ($foundryCliPath) {
-        Write-Info "Setting Foundry CLI path to $foundryCliPath"
-        $settings = Get-Content $appSettingsPath -Raw | ConvertFrom-Json
-        if (-not $settings.LlmProviders.Foundry.PSObject.Properties['CliPath']) {
-            $settings.LlmProviders.Foundry | Add-Member -NotePropertyName 'CliPath' -NotePropertyValue $foundryCliPath
-        } else {
-            $settings.LlmProviders.Foundry.CliPath = $foundryCliPath
-        }
-        $settings | ConvertTo-Json -Depth 10 | Set-Content $appSettingsPath -Encoding UTF8
-        Write-Success "Foundry CLI path configured: $foundryCliPath"
-    } else {
-        Write-Warning2 "Could not find foundry.exe — model download/delete from UI will not work"
-        Write-Warning2 "Set 'LlmProviders:Foundry:CliPath' in appsettings.json manually"
-    }
+    # No CLI path needed — the app uses REST APIs for all Foundry interactions
 } else {
     Write-Warning2 "appsettings.json not found at $appSettingsPath"
 }

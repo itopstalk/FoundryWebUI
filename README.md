@@ -14,7 +14,8 @@ A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think
 - **📦 Model Management** — Browse the full Foundry Local catalog (40+ models), download with progress tracking, and remove downloaded models
 - **✅ Can Run Indicator** — Estimates RAM requirements for each model and shows whether your system can run it
 - **🔌 Foundry Local Connection** — Bright green/red status indicator with endpoint display and reconnect button
-- **🔍 Auto-Discovery** — Automatically detects the Foundry Local endpoint via CLI or port scanning
+- **🔍 Auto-Discovery** — Automatically detects the Foundry Local endpoint via port scanning
+- **🔌 REST-Only** — No CLI dependency; all interactions (download, delete, chat) use Foundry Local REST APIs
 - **🌙 Dark Theme** — Bootstrap 5 dark mode UI optimized for extended use
 - **🚀 IIS Hosted** — Runs as an in-process IIS application with zero external dependencies beyond .NET
 
@@ -32,7 +33,7 @@ Browser ──── HTTP/SSE ────▶ IIS + ASP.NET Core
 |---|---|
 | **Razor Pages** | Chat (`/`) and Models (`/Models`) pages |
 | **API Controller** | REST + SSE endpoints under `/api/` |
-| **FoundryLocalService** | Adapter for Foundry Local REST API + CLI (`foundry model download`, `foundry cache remove`) |
+| **FoundryLocalService** | Adapter for Foundry Local REST API (download, delete, chat, catalog) |
 | **ILlmProvider** | Provider interface for extensibility |
 
 ## Quick Start
@@ -82,8 +83,7 @@ git pull
 The script auto-detects existing installations and:
 - Skips prerequisite installation (IIS, .NET, Foundry Local)
 - Stops the IIS site, rebuilds from source, and redeploys
-- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint, CLI path)
-- Auto-detects and configures the Foundry CLI path for IIS
+- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint)
 
 ## API Endpoints
 
@@ -122,8 +122,7 @@ Edit `appsettings.json`:
 {
   "LlmProviders": {
     "Foundry": {
-      "Endpoint": "",
-      "CliPath": ""
+      "Endpoint": ""
     }
   }
 }
@@ -132,21 +131,8 @@ Edit `appsettings.json`:
 | Setting | Default | Notes |
 |---|---|---|
 | `Foundry:Endpoint` | *(blank — auto-detect)* | Set explicitly (e.g., `http://localhost:5273`) if auto-detection fails from IIS |
-| `Foundry:CliPath` | *(blank — auto-detect)* | Full path to `foundry.exe`. Required for model download/remove from IIS. The installer sets this automatically |
 
-### Finding the Foundry CLI path
-
-If the installer doesn't auto-detect it, find it manually:
-
-```powershell
-Get-Command foundry | Select-Object Source
-```
-
-Set the result in `appsettings.json` (use double backslashes in JSON):
-
-```json
-"CliPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\foundry.exe"
-```
+> **Tip**: Pin the Foundry Local port with `foundry service set --port 5273` for consistent auto-detection.
 
 ## Project Structure
 
@@ -158,7 +144,7 @@ FoundryWebUI/
 │   └── LlmModels.cs              # DTOs (ChatMessage, ModelInfo, etc.)
 ├── Services/
 │   ├── ILlmProvider.cs           # Provider interface
-│   └── FoundryLocalService.cs    # Foundry Local adapter (API + CLI)
+│   └── FoundryLocalService.cs    # Foundry Local adapter (REST API only)
 ├── Pages/
 │   ├── Index.cshtml              # Chat page with status panel
 │   ├── Models.cshtml             # Model management (download/remove)
@@ -170,7 +156,7 @@ FoundryWebUI/
 │       ├── chat.js               # Chat UI logic + SSE streaming
 │       └── models.js             # Model listing, download, remove
 ├── Program.cs                    # App startup and DI configuration
-├── appsettings.json              # Configuration (endpoint + CLI path)
+├── appsettings.json              # Configuration (Foundry endpoint)
 ├── web.config                    # IIS hosting configuration
 ├── Install-FoundryWebUI.ps1      # Automated deployment script
 └── DEPLOYMENT.md                 # Full deployment & troubleshooting guide
@@ -182,8 +168,8 @@ FoundryWebUI/
 |---|---|---|
 | Foundry shows red indicator in nav bar | Foundry Local not running or unreachable | Start it: `foundry service start` |
 | No models listed | Foundry Local not connected | Check endpoint in appsettings.json or click 🔄 Reconnect on home page |
-| Download fails: "foundry CLI not found" | IIS can't find `foundry.exe` | Set `CliPath` in appsettings.json (see Configuration) |
-| Remove fails | Wrong CLI command or CLI not found | Ensure `CliPath` is set; uses `foundry cache remove` |
+| Download fails | Foundry Local REST API error | Ensure Foundry Local is running; check IIS stdout logs |
+| Remove fails | File permissions or model still loaded | Ensure IIS app pool identity has write access to Foundry cache directory |
 | HTTP 500.30 on IIS | Hosting Bundle not installed | See [DEPLOYMENT.md — Troubleshooting](DEPLOYMENT.md#troubleshooting) |
 | Chat shows no response | JSON casing mismatch or model not loaded | Check IIS stdout logs; ensure a model is loaded |
 | Can't access from other machines | Windows Firewall blocking port | `New-NetFirewallRule -DisplayName "FoundryWebUI" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow` |

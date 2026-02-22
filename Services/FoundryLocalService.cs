@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using FoundryWebUI.Models;
 
 namespace FoundryWebUI.Services;
@@ -35,46 +36,7 @@ public class FoundryLocalService : ILlmProvider
         if (_cachedEndpoint != null)
             return _cachedEndpoint;
 
-        // Primary: discover via foundry CLI (port is random on each start)
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "foundry",
-                Arguments = "service status",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var process = System.Diagnostics.Process.Start(psi);
-            if (process != null)
-            {
-                var outputTask = process.StandardOutput.ReadToEndAsync();
-                if (process.WaitForExit(15000))
-                {
-                    var output = await outputTask;
-                    // Output contains: "http://127.0.0.1:49681/openai/status" — extract base URL
-                    var match = System.Text.RegularExpressions.Regex.Match(output, @"(https?://[\d.]+:\d+)");
-                    if (match.Success)
-                    {
-                        _cachedEndpoint = match.Value.TrimEnd('/');
-                        _logger.LogInformation("Discovered Foundry Local at {Endpoint}", _cachedEndpoint);
-                        return _cachedEndpoint;
-                    }
-                }
-                else
-                {
-                    try { process.Kill(); } catch { }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to discover Foundry Local endpoint via CLI");
-        }
-
-        // Fallback: probe common ports
+        // Probe common ports to discover Foundry Local (no CLI needed)
         foreach (var port in new[] { 5272, 5273, 5274 })
         {
             try
@@ -431,203 +393,289 @@ public class FoundryLocalService : ILlmProvider
     {
         yield return new DownloadProgress { ModelId = modelId, Status = "starting" };
 
-        // Use the Foundry CLI to download — the HTTP API (/openai/download) is unreliable
-        var foundryPath = FindFoundryExecutable();
-        if (foundryPath == null)
+        var endpoint = await GetEndpointAsync();
+
+        // Find the catalog entry for this model to build the correct download request
+        if (_catalogCache == null)
         {
-            yield return new DownloadProgress { ModelId = modelId, Status = "error: foundry CLI not found on system" };
+            // Force a catalog fetch if not cached
+            await GetAvailableModelsAsync();
+        }
+
+        JsonElement? catalogEntry = null;
+        if (_catalogCache != null)
+        {
+            foreach (var entry in _catalogCache)
+            {
+                var alias = entry.TryGetProperty("alias", out var a) ? a.GetString() : null;
+                var name = entry.TryGetProperty("name", out var n) ? n.GetString() : null;
+                var displayName = entry.TryGetProperty("displayName", out var dn) ? dn.GetString() : null;
+                if (string.Equals(alias, modelId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, modelId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(displayName, modelId, StringComparison.OrdinalIgnoreCase))
+                {
+                    catalogEntry = entry;
+                    break;
+                }
+            }
+        }
+
+        if (catalogEntry == null)
+        {
+            yield return new DownloadProgress { ModelId = modelId, Status = $"error: model '{modelId}' not found in catalog" };
             yield break;
         }
 
-        _logger.LogInformation("Starting download of {Model} using CLI: {Foundry}", modelId, foundryPath);
-        yield return new DownloadProgress { ModelId = modelId, Status = "downloading" };
+        var cat = catalogEntry.Value;
+        var modelUri = cat.TryGetProperty("uri", out var u) ? u.GetString() ?? "" : "";
+        var modelName = cat.TryGetProperty("name", out var mn) ? mn.GetString() ?? modelId : modelId;
+        // Always use "AzureFoundryLocal" — the catalog returns "AzureFoundry" which doesn't work with the download API
+        var providerType = "AzureFoundryLocal";
+        var publisher = cat.TryGetProperty("publisher", out var pub) ? pub.GetString() ?? "" : "";
 
-        var psi = new System.Diagnostics.ProcessStartInfo
+        // Build the download request body per official Foundry Local REST API docs
+        var downloadBody = new
         {
-            FileName = foundryPath,
-            Arguments = $"model download \"{modelId}\"",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
+            model = new
+            {
+                Uri = modelUri,
+                Name = modelName,
+                ProviderType = providerType,
+                Publisher = publisher
+            },
+            ignorePipeReport = true
         };
 
-        System.Diagnostics.Process? process = null;
-        string? startError = null;
-        try
-        {
-            process = System.Diagnostics.Process.Start(psi);
-        }
-        catch (Exception ex)
-        {
-            startError = ex.Message;
-        }
+        var jsonBody = JsonSerializer.Serialize(downloadBody);
+        _logger.LogInformation("Starting REST download of {Model}: {Body}", modelId, jsonBody);
+        yield return new DownloadProgress { ModelId = modelId, Status = "downloading", Percent = 0 };
 
-        if (process == null || startError != null)
-        {
-            yield return new DownloadProgress { ModelId = modelId, Status = $"error: failed to start foundry CLI — {startError}" };
-            yield break;
-        }
+        // Use a Channel to bridge the try/catch async work with yield return
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<DownloadProgress>();
 
-        // Poll until the process exits, sending heartbeats
-        var started = DateTime.UtcNow;
-        while (!process.HasExited && !cancellationToken.IsCancellationRequested)
+        // Start the download reader in a background task
+        _ = Task.Run(async () =>
         {
-            await Task.Delay(3000, cancellationToken);
-            var elapsed = (DateTime.UtcNow - started).TotalSeconds;
-            yield return new DownloadProgress
+            HttpResponseMessage? response = null;
+            try
             {
-                ModelId = modelId,
-                Status = $"downloading ({TimeSpan.FromSeconds(elapsed):mm\\:ss} elapsed)",
-                Percent = null
-            };
-        }
+                var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+                var request = new HttpRequestMessage(HttpMethod.Post, $"{endpoint}/openai/download")
+                {
+                    Content = content
+                };
+                response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken);
-        _logger.LogInformation("Foundry download exit code: {Code}, stdout: {Out}, stderr: {Err}",
-            process.ExitCode,
-            stdout.Length > 500 ? stdout[..500] : stdout,
-            stderr.Length > 500 ? stderr[..500] : stderr);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                    await channel.Writer.WriteAsync(new DownloadProgress { ModelId = modelId, Status = $"error: HTTP {response.StatusCode} — {errBody}" });
+                    return;
+                }
 
-        if (process.ExitCode == 0)
+                var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var reader = new StreamReader(stream);
+                var buffer = new char[4096];
+                var lineBuffer = new StringBuilder();
+                double lastPercent = 0;
+                var started = DateTime.UtcNow;
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    int read = await reader.ReadAsync(buffer, 0, buffer.Length);
+                    if (read == 0) break;
+
+                    lineBuffer.Append(buffer, 0, read);
+                    var text = lineBuffer.ToString();
+
+                    // Parse progress lines: "Total X.XXX% Downloading filename"
+                    var matches = Regex.Matches(text, @"Total\s+([\d.]+)%");
+                    if (matches.Count > 0)
+                    {
+                        var latestMatch = matches[^1];
+                        if (double.TryParse(latestMatch.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var percent))
+                        {
+                            lastPercent = percent;
+                            var elapsed = (DateTime.UtcNow - started).TotalSeconds;
+                            await channel.Writer.WriteAsync(new DownloadProgress
+                            {
+                                ModelId = modelId,
+                                Status = $"downloading ({TimeSpan.FromSeconds(elapsed):mm\\:ss} elapsed)",
+                                Percent = percent
+                            });
+                        }
+                    }
+
+                    // Check for final JSON response
+                    if (text.Contains("\"success\"") || text.Contains("\"Success\""))
+                    {
+                        var jsonStart = text.IndexOf('{');
+                        if (jsonStart >= 0)
+                        {
+                            var jsonStr = text[jsonStart..];
+                            try
+                            {
+                                using var doc = JsonDocument.Parse(jsonStr);
+                                var success = false;
+                                if (doc.RootElement.TryGetProperty("success", out var s))
+                                    success = s.GetBoolean();
+                                else if (doc.RootElement.TryGetProperty("Success", out var s2))
+                                    success = s2.GetBoolean();
+
+                                if (success)
+                                    await channel.Writer.WriteAsync(new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 });
+                                else
+                                {
+                                    var errMsg = doc.RootElement.TryGetProperty("errorMessage", out var e) ? e.GetString()
+                                        : doc.RootElement.TryGetProperty("ErrorMessage", out var e2) ? e2.GetString()
+                                        : "Unknown error";
+                                    await channel.Writer.WriteAsync(new DownloadProgress { ModelId = modelId, Status = $"error: {errMsg}" });
+                                }
+                                return;
+                            }
+                            catch { /* partial JSON, keep reading */ }
+                        }
+                    }
+
+                    var lastNewline = text.LastIndexOf('\n');
+                    if (lastNewline >= 0)
+                        lineBuffer = new StringBuilder(text[(lastNewline + 1)..]);
+                }
+
+                // Stream ended — determine outcome
+                if (lastPercent >= 99)
+                    await channel.Writer.WriteAsync(new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 });
+                else
+                    await channel.Writer.WriteAsync(new DownloadProgress { ModelId = modelId, Status = $"error: download stream ended at {lastPercent:F1}%" });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Download stream error");
+                await channel.Writer.WriteAsync(new DownloadProgress { ModelId = modelId, Status = $"error: {ex.Message}" });
+            }
+            finally
+            {
+                response?.Dispose();
+                channel.Writer.Complete();
+            }
+        }, cancellationToken);
+
+        await foreach (var progress in channel.Reader.ReadAllAsync(cancellationToken))
         {
-            yield return new DownloadProgress { ModelId = modelId, Status = "complete", Percent = 100 };
-        }
-        else
-        {
-            var errMsg = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
-            yield return new DownloadProgress { ModelId = modelId, Status = $"error: {errMsg}" };
+            yield return progress;
         }
     }
 
     public async Task<bool> DeleteModelAsync(string modelId, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Deleting model {ModelId}", modelId);
-        var foundryPath = FindFoundryExecutable();
-        if (foundryPath == null)
-        {
-            _logger.LogError("foundry CLI not found — cannot delete model");
-            return false;
-        }
+        _logger.LogInformation("Deleting model {ModelId} via REST + file deletion", modelId);
+        var endpoint = await GetEndpointAsync();
 
+        // Step 1: Unload the model from memory via REST
         try
         {
-            // Foundry uses "cache remove" not "model remove"
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = foundryPath,
-                Arguments = $"cache remove \"{modelId}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var process = System.Diagnostics.Process.Start(psi);
-            if (process != null)
-            {
-                // Auto-confirm any prompt
-                await process.StandardInput.WriteLineAsync("y");
-                process.StandardInput.Close();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(10000);
+            var unloadResp = await _httpClient.GetAsync($"{endpoint}/openai/unload/{Uri.EscapeDataString(modelId)}?force=true", cts.Token);
+            _logger.LogInformation("Unload {ModelId}: {Status}", modelId, unloadResp.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unload request failed for {ModelId} (may not be loaded)", modelId);
+        }
 
-                var outputTask = process.StandardOutput.ReadToEndAsync();
-                var errorTask = process.StandardError.ReadToEndAsync();
-                if (process.WaitForExit(60000))
-                {
-                    var output = await outputTask;
-                    var error = await errorTask;
-                    _logger.LogInformation("Cache remove exit: {Code}, stdout: {Out}, stderr: {Err}", process.ExitCode, output, error);
-                    return process.ExitCode == 0;
-                }
-                else
-                {
-                    try { process.Kill(); } catch { }
-                    _logger.LogWarning("Cache remove timed out for {ModelId}", modelId);
-                }
+        // Step 2: Get cache directory from /openai/status
+        string? modelDirPath = null;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(5000);
+            var statusResp = await _httpClient.GetAsync($"{endpoint}/openai/status", cts.Token);
+            if (statusResp.IsSuccessStatusCode)
+            {
+                var statusJson = await statusResp.Content.ReadAsStringAsync(cancellationToken);
+                using var doc = JsonDocument.Parse(statusJson);
+                // Try both camelCase and PascalCase
+                if (doc.RootElement.TryGetProperty("modelDirPath", out var mdp))
+                    modelDirPath = mdp.GetString();
+                else if (doc.RootElement.TryGetProperty("ModelDirPath", out var mdp2))
+                    modelDirPath = mdp2.GetString();
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete model {ModelId}", modelId);
+            _logger.LogWarning(ex, "Failed to get model directory path from status endpoint");
         }
-        return false;
-    }
 
-    /// <summary>Find the foundry executable — IIS app pool may not have it on PATH.</summary>
-    private string? FindFoundryExecutable()
-    {
-        // 1. Check appsettings.json config
-        var configPath = _configuration["LlmProviders:Foundry:CliPath"];
-        if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
+        if (string.IsNullOrEmpty(modelDirPath) || !Directory.Exists(modelDirPath))
         {
-            _logger.LogInformation("Using configured foundry path: {Path}", configPath);
-            return configPath;
+            _logger.LogError("Cannot determine model cache directory (modelDirPath={Path})", modelDirPath);
+            return false;
         }
-        // Check each user profile for common foundry locations
-        var usersDir = @"C:\Users";
-        if (Directory.Exists(usersDir))
+
+        // Step 3: Find and delete the model directory
+        // Model directories follow pattern: {modelDirPath}/{Publisher}/{ModelName-Version}
+        // where ":" in the model ID is replaced with "-" in the directory name
+        var dirName = modelId.Replace(':', '-');
+        bool deleted = false;
+
+        foreach (var publisherDir in Directory.GetDirectories(modelDirPath))
         {
-            foreach (var userDir in Directory.GetDirectories(usersDir))
+            var modelDir = Path.Combine(publisherDir, dirName);
+            if (Directory.Exists(modelDir))
             {
-                // winget installs create App Execution Aliases here
-                var wingetAlias = Path.Combine(userDir, "AppData", "Local", "Microsoft", "WinGet", "Links", "foundry.exe");
-                if (File.Exists(wingetAlias))
+                try
                 {
-                    _logger.LogInformation("Found foundry at {Path}", wingetAlias);
-                    return wingetAlias;
+                    Directory.Delete(modelDir, recursive: true);
+                    _logger.LogInformation("Deleted model directory: {Path}", modelDir);
+                    deleted = true;
+                    break;
                 }
-
-                // WindowsApps execution alias
-                var windowsApps = Path.Combine(userDir, "AppData", "Local", "Microsoft", "WindowsApps", "foundry.exe");
-                if (File.Exists(windowsApps))
+                catch (Exception ex)
                 {
-                    _logger.LogInformation("Found foundry at {Path}", windowsApps);
-                    return windowsApps;
-                }
-
-                // .foundry SDK install
-                var userFoundry = Path.Combine(userDir, ".foundry", "bin", "foundry.exe");
-                if (File.Exists(userFoundry))
-                {
-                    _logger.LogInformation("Found foundry at {Path}", userFoundry);
-                    return userFoundry;
+                    _logger.LogError(ex, "Failed to delete model directory {Path}", modelDir);
+                    return false;
                 }
             }
         }
 
-        // Check common install locations
-        var candidates = new[]
+        if (!deleted)
         {
-            @"C:\Program Files\Foundry\foundry.exe",
-            @"C:\Program Files (x86)\Foundry\foundry.exe",
-            @"C:\Program Files\WindowsApps\foundry.exe",
-        };
-        foreach (var path in candidates)
-        {
-            if (File.Exists(path)) return path;
-        }
-
-        // Try PATH via 'where' command as fallback
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo
+            // Try finding by partial name match in case the directory naming is different
+            foreach (var publisherDir in Directory.GetDirectories(modelDirPath))
             {
-                FileName = "where",
-                Arguments = "foundry",
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc != null && proc.WaitForExit(5000) && proc.ExitCode == 0)
-            {
-                var result = proc.StandardOutput.ReadToEnd().Trim().Split('\n')[0].Trim();
-                if (File.Exists(result)) return result;
+                var nameWithoutVersion = modelId.Contains(':') ? modelId[..modelId.LastIndexOf(':')] : modelId;
+                foreach (var dir in Directory.GetDirectories(publisherDir))
+                {
+                    var folderName = Path.GetFileName(dir);
+                    if (folderName.StartsWith(nameWithoutVersion.Replace(':', '-'), StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            Directory.Delete(dir, recursive: true);
+                            _logger.LogInformation("Deleted model directory (partial match): {Path}", dir);
+                            deleted = true;
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to delete model directory {Path}", dir);
+                            return false;
+                        }
+                    }
+                }
+                if (deleted) break;
             }
         }
-        catch { }
 
-        return null;
+        if (!deleted)
+        {
+            _logger.LogWarning("Could not find model directory for {ModelId} in {CachePath}", modelId, modelDirPath);
+            return false;
+        }
+
+        return true;
     }
+
 }

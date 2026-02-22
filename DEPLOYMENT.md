@@ -291,16 +291,6 @@ foundry model list
 foundry model run phi-3.5-mini
 ```
 
-#### Note the Foundry CLI path for IIS
-
-IIS runs under a different user account and may not find `foundry.exe` on PATH. Record the path:
-
-```powershell
-Get-Command foundry | Select-Object Source
-```
-
-You will need this for `appsettings.json` (the installer sets it automatically).
-
 ---
 
 ## Step 5: Build and Publish the Application
@@ -414,8 +404,7 @@ Edit `C:\inetpub\FoundryWebUI\appsettings.json`:
   "AllowedHosts": "*",
   "LlmProviders": {
     "Foundry": {
-      "Endpoint": "http://localhost:5273",
-      "CliPath": ""
+      "Endpoint": "http://localhost:5273"
     }
   }
 }
@@ -426,7 +415,6 @@ Edit `C:\inetpub\FoundryWebUI\appsettings.json`:
 | Setting | Description |
 |---|---|
 | `LlmProviders:Foundry:Endpoint` | Leave **blank** to auto-detect via port scanning. Set explicitly (e.g., `http://localhost:5273`) for reliability. |
-| `LlmProviders:Foundry:CliPath` | Full path to `foundry.exe`. **Required** for model download and remove from the web UI. The installer sets this automatically. Find manually with `Get-Command foundry \| Select Source`. |
 | `AllowedHosts` | Set to `*` for open access. Restrict to specific hostnames for security (e.g., `myserver.contoso.com`). |
 
 ### Environment-Specific Overrides
@@ -635,8 +623,7 @@ If you prefer to update manually:
 2. If Foundry Local is running but the app can't detect it, set the endpoint explicitly in `appsettings.json`:
    ```json
    "Foundry": {
-     "Endpoint": "http://localhost:5273",
-     "CliPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\foundry.exe"
+     "Endpoint": "http://localhost:5273"
    }
    ```
 3. Verify from the server itself:
@@ -659,11 +646,15 @@ If you prefer to update manually:
 
 **Symptoms**: Foundry shows as unavailable (red ✗) even though `foundry service status` works in a terminal.
 
-**Cause**: The IIS App Pool identity (`IIS AppPool\FoundryWebUI`) cannot execute the `foundry` CLI.
+**Cause**: The app probes ports 5272-5274 to discover Foundry Local. If Foundry uses a random port, auto-detection fails.
 
 **Solutions** (choose one):
-- **Recommended**: Set the endpoint explicitly in `appsettings.json`.
-- Change the App Pool identity to **LocalSystem** or a user account that has `foundry` on its PATH (IIS Manager → Application Pool → Advanced Settings → Identity).
+- **Recommended**: Pin the Foundry port and set the endpoint explicitly in `appsettings.json`:
+  ```powershell
+  foundry service set --port 5273
+  ```
+  Then set `"Endpoint": "http://localhost:5273"` in `appsettings.json`.
+- Change Foundry to use a port in the 5272-5274 range (auto-detected).
 
 ### 6. Streaming responses don't work (messages appear all at once)
 
@@ -701,25 +692,23 @@ Get-Process -Name "dotnet", "foundry*" | Select-Object Name, WorkingSet64, CPU
 - The FoundryWebUI app itself uses minimal memory (~50–100 MB).
 - Use `foundry model unload <model>` to free memory from loaded models.
 
-### 9. Model download or remove fails: "foundry CLI not found"
+### 9. Model download or remove fails
 
-**Cause**: IIS runs under a different user account (`IIS AppPool\FoundryWebUI`) which doesn't have `foundry.exe` on its PATH. The Windows App Execution Alias at `WindowsApps\foundry.exe` only works for the installing user.
+**Possible causes**:
+- **Download fails**: Foundry Local service not reachable, or the download API returned an error. Check the app logs.
+- **Remove fails**: The IIS app pool identity doesn't have write access to the Foundry cache directory.
 
-**Solution**:
-1. Find the actual foundry path:
+**Solution for remove failures**:
+1. Find the Foundry cache location:
    ```powershell
-   Get-Command foundry | Select-Object Source
+   foundry cache location
    ```
-2. Set it in `C:\inetpub\FoundryWebUI\appsettings.json`:
-   ```json
-   "Foundry": {
-     "Endpoint": "http://localhost:5273",
-     "CliPath": "C:\\Users\\Administrator\\AppData\\Local\\Microsoft\\WindowsApps\\foundry.exe"
-   }
+2. Grant the IIS app pool identity write access:
+   ```powershell
+   $cachePath = "C:\Users\Administrator\.foundry\cache\models"
+   icacls $cachePath /grant "IIS AppPool\FoundryWebUI:(OI)(CI)F" /T
    ```
 3. Restart the IIS site.
-
-> ℹ️ The installer auto-detects and sets this path. Re-run `.\Install-FoundryWebUI.ps1` to update it.
 
 ### 10. Foundry CLI commands reference
 
@@ -801,7 +790,7 @@ The `Install-FoundryWebUI.ps1` script automates the entire installation and upda
 
 ### Behavior
 
-- **Fresh install** (no existing deployment at `InstallPath`): Installs IIS, .NET, Foundry Local, creates IIS site, deploys the app, and auto-detects + configures the Foundry CLI path.
+- **Fresh install** (no existing deployment at `InstallPath`): Installs IIS, .NET, Foundry Local, creates IIS site, deploys the app, and configures the Foundry endpoint.
 - **Update** (existing `FoundryWebUI.dll` found at `InstallPath`): Stops IIS site, backs up `appsettings.json`, rebuilds, restores settings, restarts site. Prerequisites are automatically skipped.
 
 ### Usage Examples
