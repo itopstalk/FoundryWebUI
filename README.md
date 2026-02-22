@@ -1,6 +1,6 @@
 # FoundryLocalWebUI
 
-A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core — designed to run on Windows Server alongside your local LLM inference engine.
+A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core -- designed to run on Windows Server alongside your local LLM inference engine.
 
 > **Note**: This project supports **Foundry Local only**. Ollama is not supported.
 
@@ -8,16 +8,70 @@ A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think
 ![Framework](https://img.shields.io/badge/.NET-8.0-purple)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## Deployment
+
+Deployment to a fresh Windows Server requires only **Git** and an elevated PowerShell prompt. The installer script handles everything else.
+
+### Step 1: Install Git
+
+```powershell
+winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+# Close and reopen PowerShell so git is on PATH
+```
+
+### Step 2: Clone and run the installer
+
+```powershell
+cd C:\Projects
+git clone https://github.com/itopstalk/FoundryWebUI.git FoundryLocalWebUI
+cd FoundryLocalWebUI
+.\Install-FoundryWebUI.ps1
+```
+
+### What the installer does
+
+On **first run**, the script performs the following (all automated, no manual steps):
+
+- **Checks for WinGet** -- required for installing other components
+- **Installs IIS** with required features (WebSockets, static compression, Windows Authentication)
+- **Installs .NET 8.0 Hosting Bundle** -- required for IIS to run ASP.NET Core apps
+- **Installs .NET 8.0 SDK** -- required to build the application from source
+- **Installs Microsoft Foundry Local** via WinGet and pins it to port 5273
+- **Builds the application** from source using `dotnet publish`
+- **Creates an IIS website** and application pool (defaults: site `FoundryLocalWebUI` on port 80)
+- **Configures permissions** -- grants IIS app pool identity access to the Foundry Local model cache
+- **Adds a Windows Firewall rule** for the configured port
+- **Verifies the deployment** by testing the site URL and API endpoint
+
+On **subsequent runs** (after `git pull`), the script auto-detects the existing installation and:
+
+- Skips prerequisite installation (IIS, .NET, Foundry Local)
+- Stops the IIS site, rebuilds from source, and redeploys
+- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint)
+
+### Update an existing deployment
+
+```powershell
+cd C:\Projects\FoundryLocalWebUI
+git pull
+.\Install-FoundryWebUI.ps1
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step manual guide and troubleshooting.
+
 ## Features
 
-- **💬 Chat Interface** — Conversational UI with streaming responses (Server-Sent Events), message history, and basic Markdown rendering
-- **📦 Model Management** — Browse the full Foundry Local catalog (40+ models), download with progress tracking, and remove downloaded models
-- **✅ Can Run Indicator** — Estimates RAM requirements for each model and shows whether your system can run it
-- **🔌 Foundry Local Connection** — Bright green/red status indicator with endpoint display and reconnect button
-- **🔍 Auto-Discovery** — Automatically detects the Foundry Local endpoint via port scanning
-- **🔌 REST-Only** — No CLI dependency; all interactions (download, delete, chat) use Foundry Local REST APIs
-- **🌙 Dark Theme** — Bootstrap 5 dark mode UI optimized for extended use
-- **🚀 IIS Hosted** — Runs as an in-process IIS application with zero external dependencies beyond .NET
+- **Chat Interface** -- Conversational UI with streaming responses (Server-Sent Events), message history, and basic Markdown rendering
+- **Model Management** -- Browse the full Foundry Local catalog (40+ models), download with progress tracking, and remove downloaded models
+- **Sortable Model Table** -- Click any column header to sort by name, status, size, RAM, device type, etc.
+- **Can Run Indicator** -- Estimates RAM requirements for each model and shows whether your system can run it
+- **Foundry Local Connection** -- Bright green/red status indicator with endpoint display and reconnect button
+- **Auto-Discovery** -- Automatically detects the Foundry Local endpoint via port scanning
+- **REST-Only** -- No CLI dependency; all interactions (download, delete, chat) use Foundry Local REST APIs
+- **Logs Page** -- View application, IIS, Foundry Local, and Windows Event Log entries with filtering and search
+- **Sidebar Navigation** -- Collapsible sidebar for navigating between Chat, Models, and Logs pages
+- **Dark Theme** -- Bootstrap 5 dark mode UI optimized for extended use
+- **IIS Hosted** -- Runs as an in-process IIS application with zero external dependencies beyond .NET
 
 ## Architecture
 
@@ -36,15 +90,7 @@ Browser ──── HTTP/SSE ────▶ IIS + ASP.NET Core
 | **FoundryLocalService** | Adapter for Foundry Local REST API (download, delete, chat, catalog) |
 | **ILlmProvider** | Provider interface for extensibility |
 
-## Quick Start
-
-### Prerequisites
-
-- Windows Server 2025 (or Windows 10/11)
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Microsoft Foundry Local](https://www.foundrylocal.ai/) (installed via `winget install Microsoft.FoundryLocal`)
-
-### Run locally (development)
+## Development (run locally)
 
 ```powershell
 cd C:\Projects\FoundryLocalWebUI
@@ -57,33 +103,6 @@ dotnet run
 ```
 
 Open `http://localhost:5207` in your browser.
-
-### Deploy to IIS (production)
-
-```powershell
-# Use the automated installer (elevated PowerShell)
-.\Install-FoundryLocalWebUI.ps1
-
-# Or publish manually
-dotnet publish -c Release -o C:\inetpub\FoundryLocalWebUI
-```
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step guide, including all prerequisite installation commands for a fresh Windows Server 2025.
-
-### Update an existing deployment
-
-After pulling the latest changes from Git, simply re-run the installer:
-
-```powershell
-git reset --hard origin/main   # if local changes exist
-git pull
-.\Install-FoundryLocalWebUI.ps1
-```
-
-The script auto-detects existing installations and:
-- Skips prerequisite installation (IIS, .NET, Foundry Local)
-- Stops the IIS site, rebuilds from source, and redeploys
-- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint)
 
 ## API Endpoints
 
@@ -144,21 +163,24 @@ FoundryLocalWebUI/
 │   └── LlmModels.cs              # DTOs (ChatMessage, ModelInfo, etc.)
 ├── Services/
 │   ├── ILlmProvider.cs           # Provider interface
-│   └── FoundryLocalService.cs    # Foundry Local adapter (REST API only)
+│   ├── FoundryLocalService.cs    # Foundry Local adapter (REST API only)
+│   └── InMemoryLogStore.cs       # Ring buffer for application log capture
 ├── Pages/
 │   ├── Index.cshtml              # Chat page with status panel
 │   ├── Models.cshtml             # Model management (download/remove)
-│   └── Shared/_Layout.cshtml     # Shared layout (dark theme, status indicator)
+│   ├── Logs.cshtml               # Log viewer (app, IIS, Foundry, Event Log)
+│   └── Shared/_Layout.cshtml     # Sidebar layout (dark theme, status indicator)
 ├── wwwroot/
 │   ├── css/site.css              # Custom styles
 │   └── js/
-│       ├── site.js               # Foundry status check + reconnect
+│       ├── site.js               # Sidebar toggle, Foundry status check
 │       ├── chat.js               # Chat UI logic + SSE streaming
-│       └── models.js             # Model listing, download, remove
+│       ├── models.js             # Model listing, download, remove, sorting
+│       └── logs.js               # Log viewer UI with tabs and filtering
 ├── Program.cs                    # App startup and DI configuration
 ├── appsettings.json              # Configuration (Foundry endpoint)
 ├── web.config                    # IIS hosting configuration
-├── Install-FoundryLocalWebUI.ps1      # Automated deployment script
+├── Install-FoundryWebUI.ps1      # Automated deployment script
 └── DEPLOYMENT.md                 # Full deployment & troubleshooting guide
 ```
 
