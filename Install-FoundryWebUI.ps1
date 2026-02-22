@@ -550,7 +550,8 @@ try {
         Write-Success "Write permission granted on Foundry cache: $foundryCachePath"
     } else {
         Write-Warning2 "Could not find Foundry cache directory — model removal from UI may fail"
-        Write-Warning2 "After Foundry downloads a model, run: icacls <cache-path> /grant `"IIS AppPool\$AppPoolName`:(OI)(CI)F`" /T"
+        $icaclsHint = 'After Foundry downloads a model, run: icacls <cache-path> /grant "IIS AppPool\' + $AppPoolName + ':(OI)(CI)F" /T'
+        Write-Warning2 $icaclsHint
     }
 } catch {
     Write-Warning2 "Failed to set Foundry cache permissions: $_"
@@ -577,7 +578,7 @@ if (-not $SkipFirewall) {
     }
     Write-Success "Firewall rule configured for port $Port"
 } else {
-    Write-Info "Skipping firewall configuration (--SkipFirewall specified)"
+    Write-Info 'Skipping firewall configuration (-SkipFirewall specified)'
 }
 
 # ============================================================
