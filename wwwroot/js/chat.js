@@ -78,12 +78,19 @@ function renderMessages() {
 
     chatMessages.innerHTML = conversation.map((msg, i) => {
         const isUser = msg.role === 'user';
+        const contextWarning = msg.contextExceeded
+            ? `<div class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-flex align-items-center gap-2">
+                 <span style="font-size:1.2em;">🚫</span>
+                 <span>Context limit reached — this model's token window is full. <strong>Start a new chat</strong> to continue.</span>
+               </div>`
+            : '';
         return `
             <div class="d-flex mb-3 ${isUser ? 'justify-content-end' : 'justify-content-start'}">
                 <div class="card ${isUser ? 'bg-primary text-white' : 'bg-body-secondary'}" style="max-width: 80%;">
                     <div class="card-body py-2 px-3">
                         <small class="fw-bold">${isUser ? 'You' : '🤖 Assistant'}</small>
                         <div class="mt-1 message-content">${formatContent(msg.content)}</div>
+                        ${contextWarning}
                     </div>
                 </div>
             </div>`;
@@ -185,7 +192,12 @@ async function sendMessage() {
                             conversation[thinkingIdx].content += data.content;
                         }
                         if (data.error) {
-                            conversation[thinkingIdx].content += `\n⚠️ ${data.error}`;
+                            if (data.error === 'context_length_exceeded') {
+                                conversation[thinkingIdx].content += '\n\n⚠️ **Context limit reached** — The conversation is too long for this model. Start a new chat or use a model with a larger context window.';
+                                conversation[thinkingIdx].contextExceeded = true;
+                            } else {
+                                conversation[thinkingIdx].content += `\n\n⚠️ Error: ${data.error}`;
+                            }
                         }
                         renderMessages();
                     } catch (parseErr) {

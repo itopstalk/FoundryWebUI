@@ -350,12 +350,34 @@ public class FoundryLocalService : ILlmProvider
 
             using (doc)
             {
+                // Check for error responses (Foundry returns Successful:false with error object)
                 if (doc.RootElement.TryGetProperty("error", out var errProp))
                 {
-                    var errMsg = errProp.ValueKind == JsonValueKind.String
-                        ? errProp.GetString()
-                        : errProp.TryGetProperty("message", out var em) ? em.GetString() : jsonData;
-                    yield return new ChatResponse { Content = $"⚠️ {errMsg}", Done = true };
+                    string errMsg;
+                    string? errCode = null;
+                    if (errProp.ValueKind == JsonValueKind.String)
+                    {
+                        errMsg = errProp.GetString() ?? "Unknown error";
+                    }
+                    else if (errProp.ValueKind == JsonValueKind.Object)
+                    {
+                        errCode = errProp.TryGetProperty("code", out var codeProp) ? codeProp.GetString() : null;
+                        var errType = errProp.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
+                        errMsg = errProp.TryGetProperty("message", out var msgProp) ? msgProp.GetString() ?? "" : "";
+                        if (string.IsNullOrEmpty(errMsg))
+                            errMsg = errCode ?? errType ?? "Unknown error";
+                    }
+                    else
+                    {
+                        errMsg = "Unknown error";
+                    }
+
+                    yield return new ChatResponse
+                    {
+                        Content = "",
+                        Done = true,
+                        Error = errCode ?? errMsg
+                    };
                     yield break;
                 }
 
