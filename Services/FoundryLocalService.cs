@@ -637,7 +637,7 @@ public class FoundryLocalService : ILlmProvider
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogError(ex, "Permission denied accessing cache directory {Path}. Grant the IIS app pool identity access: icacls \"{Path}\" /grant \"IIS AppPool\\FoundryWebUI:(OI)(CI)F\" /T", modelDirPath, modelDirPath);
+            _logger.LogError(ex, "Permission denied accessing cache directory {Path}. Grant the IIS app pool identity access: icacls \"{Path}\" /grant \"IIS AppPool\\FoundryLocalWebUI:(OI)(CI)F\" /T", modelDirPath, modelDirPath);
             return false;
         }
         catch (Exception ex)

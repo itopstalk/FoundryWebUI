@@ -384,7 +384,7 @@ public class ApiController : ControllerBase
         }
         catch (Exception ex)
         {
-            entries.Add(new { time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), source = "FoundryWebUI", level = "error", message = $"Cannot read Event Log: {ex.Message}" });
+            entries.Add(new { time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), source = "FoundryLocalWebUI", level = "error", message = $"Cannot read Event Log: {ex.Message}" });
         }
         return new { source = "eventlog", entries };
     }

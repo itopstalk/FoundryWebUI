@@ -1,4 +1,4 @@
-# FoundryWebUI
+# FoundryLocalWebUI
 
 A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core — designed to run on Windows Server alongside your local LLM inference engine.
 
@@ -47,7 +47,7 @@ Browser ──── HTTP/SSE ────▶ IIS + ASP.NET Core
 ### Run locally (development)
 
 ```powershell
-cd C:\Projects\FoundryWebUI
+cd C:\Projects\FoundryLocalWebUI
 
 # Ensure Foundry Local is running
 foundry service start
@@ -62,10 +62,10 @@ Open `http://localhost:5207` in your browser.
 
 ```powershell
 # Use the automated installer (elevated PowerShell)
-.\Install-FoundryWebUI.ps1
+.\Install-FoundryLocalWebUI.ps1
 
 # Or publish manually
-dotnet publish -c Release -o C:\inetpub\FoundryWebUI
+dotnet publish -c Release -o C:\inetpub\FoundryLocalWebUI
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step guide, including all prerequisite installation commands for a fresh Windows Server 2025.
@@ -77,7 +77,7 @@ After pulling the latest changes from Git, simply re-run the installer:
 ```powershell
 git reset --hard origin/main   # if local changes exist
 git pull
-.\Install-FoundryWebUI.ps1
+.\Install-FoundryLocalWebUI.ps1
 ```
 
 The script auto-detects existing installations and:
@@ -137,7 +137,7 @@ Edit `appsettings.json`:
 ## Project Structure
 
 ```
-FoundryWebUI/
+FoundryLocalWebUI/
 ├── Controllers/
 │   └── ApiController.cs          # REST + SSE API endpoints
 ├── Models/
@@ -158,7 +158,7 @@ FoundryWebUI/
 ├── Program.cs                    # App startup and DI configuration
 ├── appsettings.json              # Configuration (Foundry endpoint)
 ├── web.config                    # IIS hosting configuration
-├── Install-FoundryWebUI.ps1      # Automated deployment script
+├── Install-FoundryLocalWebUI.ps1      # Automated deployment script
 └── DEPLOYMENT.md                 # Full deployment & troubleshooting guide
 ```
 
@@ -172,7 +172,7 @@ FoundryWebUI/
 | Remove fails | File permissions or model still loaded | Ensure IIS app pool identity has write access to Foundry cache directory |
 | HTTP 500.30 on IIS | Hosting Bundle not installed | See [DEPLOYMENT.md — Troubleshooting](DEPLOYMENT.md#troubleshooting) |
 | Chat shows no response | JSON casing mismatch or model not loaded | Check IIS stdout logs; ensure a model is loaded |
-| Can't access from other machines | Windows Firewall blocking port | `New-NetFirewallRule -DisplayName "FoundryWebUI" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow` |
+| Can't access from other machines | Windows Firewall blocking port | `New-NetFirewallRule -DisplayName "FoundryLocalWebUI" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow` |
 
 For the complete troubleshooting guide, see [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting).
 

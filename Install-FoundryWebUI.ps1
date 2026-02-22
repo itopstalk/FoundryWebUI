@@ -1,10 +1,10 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Automated setup and update script for FoundryWebUI on Windows Server 2025.
+    Automated setup and update script for FoundryLocalWebUI on Windows Server 2025.
 
 .DESCRIPTION
-    Installs all prerequisites and deploys FoundryWebUI as an IIS website.
+    Installs all prerequisites and deploys FoundryLocalWebUI as an IIS website.
     Safe to re-run after a git pull — detects existing installations and only
     rebuilds/redeploys the app, preserving your appsettings.json customizations.
 
@@ -22,13 +22,13 @@
     The port for the IIS website. Default: 80.
 
 .PARAMETER SiteName
-    The IIS site name. Default: FoundryWebUI.
+    The IIS site name. Default: FoundryLocalWebUI.
 
 .PARAMETER AppPoolName
-    The IIS application pool name. Default: FoundryWebUI.
+    The IIS application pool name. Default: FoundryLocalWebUI.
 
 .PARAMETER InstallPath
-    Where to publish the application. Default: C:\inetpub\FoundryWebUI.
+    Where to publish the application. Default: C:\inetpub\FoundryLocalWebUI.
 
 .PARAMETER SourcePath
     Path to a pre-built publish folder. If omitted, the script builds from the project
@@ -48,23 +48,23 @@
     Useful when you know prerequisites are already installed and just want to redeploy.
 
 .EXAMPLE
-    .\Install-FoundryWebUI.ps1
+    .\Install-FoundryLocalWebUI.ps1
     # First run: full install. Subsequent runs: rebuild and redeploy only.
 
 .EXAMPLE
-    .\Install-FoundryWebUI.ps1 -SkipPrerequisites
+    .\Install-FoundryLocalWebUI.ps1 -SkipPrerequisites
     # Fast update: just rebuild from source and redeploy.
 
 .EXAMPLE
-    .\Install-FoundryWebUI.ps1 -Port 8080
+    .\Install-FoundryLocalWebUI.ps1 -Port 8080
 #>
 
 [CmdletBinding()]
 param(
     [int]$Port = 80,
-    [string]$SiteName = "FoundryWebUI",
-    [string]$AppPoolName = "FoundryWebUI",
-    [string]$InstallPath = "C:\inetpub\FoundryWebUI",
+    [string]$SiteName = "FoundryLocalWebUI",
+    [string]$AppPoolName = "FoundryLocalWebUI",
+    [string]$InstallPath = "C:\inetpub\FoundryLocalWebUI",
     [string]$SourcePath = "",
     [switch]$SkipFirewall,
     [string]$FoundryEndpoint = "",
@@ -385,7 +385,7 @@ if ($isUpdate -and (Test-Path $appSettingsPath)) {
     $appSettingsBackup = Get-Content $appSettingsPath -Raw
 }
 
-Write-Step "Step 5: Publishing FoundryWebUI"
+Write-Step "Step 5: Publishing FoundryLocalWebUI"
 
 if ($SourcePath) {
     Write-Info "Copying pre-built application from $SourcePath"
@@ -397,7 +397,7 @@ if ($SourcePath) {
 } else {
     # Build from source — look for project in script directory
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $projectFile = Join-Path $scriptDir "FoundryWebUI.csproj"
+    $projectFile = Join-Path $scriptDir "FoundryLocalWebUI.csproj"
 
     if (-not (Test-Path $projectFile)) {
         throw "Project file not found at $projectFile. Use -SourcePath to specify a pre-built publish folder."
@@ -562,13 +562,13 @@ try {
 if (-not $SkipFirewall) {
     Write-Step "Step 9: Configuring Windows Firewall"
 
-    $existingRule = Get-NetFirewallRule -DisplayName "FoundryWebUI - HTTP Inbound" -ErrorAction SilentlyContinue
+    $existingRule = Get-NetFirewallRule -DisplayName "FoundryLocalWebUI - HTTP Inbound" -ErrorAction SilentlyContinue
     if ($existingRule) {
         Write-Info "Firewall rule already exists, updating..."
-        Set-NetFirewallRule -DisplayName "FoundryWebUI - HTTP Inbound" -LocalPort $Port
+        Set-NetFirewallRule -DisplayName "FoundryLocalWebUI - HTTP Inbound" -LocalPort $Port
     } else {
         New-NetFirewallRule `
-            -DisplayName "FoundryWebUI - HTTP Inbound" `
+            -DisplayName "FoundryLocalWebUI - HTTP Inbound" `
             -Direction Inbound `
             -Protocol TCP `
             -LocalPort $Port `
@@ -636,7 +636,7 @@ if ($isUpdate) {
     Write-Host "  To update again later:" -ForegroundColor Yellow
     Write-Host "    1. cd to your git repo folder" -ForegroundColor Yellow
     Write-Host "    2. git pull" -ForegroundColor Yellow
-    Write-Host "    3. .\Install-FoundryWebUI.ps1" -ForegroundColor Yellow
+    Write-Host "    3. .\Install-FoundryLocalWebUI.ps1" -ForegroundColor Yellow
     Write-Host ""
 } else {
     Write-Host "========================================" -ForegroundColor Green
@@ -657,6 +657,6 @@ if ($isUpdate) {
     Write-Host "  To update later:" -ForegroundColor Cyan
     Write-Host "    1. cd to your git repo folder" -ForegroundColor Cyan
     Write-Host "    2. git pull" -ForegroundColor Cyan
-    Write-Host "    3. .\Install-FoundryWebUI.ps1" -ForegroundColor Cyan
+    Write-Host "    3. .\Install-FoundryLocalWebUI.ps1" -ForegroundColor Cyan
     Write-Host ""
 }

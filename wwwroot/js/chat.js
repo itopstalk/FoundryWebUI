@@ -45,7 +45,7 @@ function renderMessages() {
     if (conversation.length === 0) {
         chatMessages.innerHTML = `
             <div class="text-center text-muted mt-5">
-                <h4>Welcome to FoundryWebUI</h4>
+                <h4>Welcome to FoundryLocalWebUI</h4>
                 <p>Select a model and start chatting</p>
             </div>`;
         return;
