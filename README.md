@@ -29,6 +29,12 @@ git clone https://github.com/itopstalk/FoundryWebUI.git FoundryLocalWebUI
 cd FoundryLocalWebUI
 .\Install-FoundryWebUI.ps1
 ```
+You will need to run the following to run unsigned scripts (remember to reenable later)
+
+```powershell
+Set-ExecutionPolicy unrestricted
+```
+
 
 ### What the installer does
 
