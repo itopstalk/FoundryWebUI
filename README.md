@@ -8,6 +8,8 @@ A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think
 ![Framework](https://img.shields.io/badge/.NET-8.0-purple)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+[![Watch the video](https://img.youtube.com/vi/IGWNhSQziZI/maxresdefault.jpg)](https://youtu.be/IGWNhSQziZI)
+
 ## Deployment
 
 Deployment to a fresh Windows Server requires only **Git** and an elevated PowerShell prompt. The installer script handles everything else.
