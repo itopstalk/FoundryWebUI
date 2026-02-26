@@ -198,36 +198,47 @@ if (Test-CommandExists "winget") {
 Write-Step "Step 2: Enabling IIS with required features"
 
 # Windows 10/11 uses Enable-WindowsOptionalFeature with DISM feature names
+# Order matters: parent features must be listed before children
 $iisFeatures = @(
+    "IIS-WebServerRole",
     "IIS-WebServer",
     "IIS-CommonHttpFeatures",
     "IIS-DefaultDocument",
     "IIS-DirectoryBrowsing",
     "IIS-HttpErrors",
     "IIS-StaticContent",
+    "IIS-HealthAndDiagnostics",
     "IIS-HttpLogging",
     "IIS-RequestMonitor",
+    "IIS-Security",
     "IIS-RequestFiltering",
+    "IIS-Performance",
     "IIS-HttpCompressionStatic",
     "IIS-HttpCompressionDynamic",
     "IIS-WebSockets",
+    "IIS-ApplicationDevelopment",
     "IIS-ApplicationInit",
     "IIS-ISAPIExtensions",
     "IIS-ISAPIFilter",
-    "IIS-ASPNET45",
+    "NetFx4Extended-ASPNET45",
     "IIS-NetFxExtensibility45",
-    "IIS-ManagementConsole",
-    "NetFx4Extended-ASPNET45"
+    "IIS-ASPNET45",
+    "IIS-WebServerManagementTools",
+    "IIS-ManagementConsole"
 )
 
 $restartNeeded = $false
 foreach ($feature in $iisFeatures) {
     $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction SilentlyContinue
-    if ($state -and $state.State -eq "Enabled") {
+    if (-not $state) {
+        Write-Info "Feature $feature not available on this edition, skipping..."
+        continue
+    }
+    if ($state.State -eq "Enabled") {
         continue
     }
     Write-Info "Enabling $feature..."
-    $result = Enable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart -ErrorAction SilentlyContinue
+    $result = Enable-WindowsOptionalFeature -Online -FeatureName $feature -All -NoRestart -ErrorAction SilentlyContinue
     if ($result -and $result.RestartNeeded) {
         $restartNeeded = $true
     }
