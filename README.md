@@ -8,8 +8,6 @@ A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think
 ![Framework](https://img.shields.io/badge/.NET-8.0-purple)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[![Watch the video](https://img.youtube.com/vi/IGWNhSQziZI/maxresdefault.jpg)](https://youtu.be/IGWNhSQziZI)
-
 ## Deployment
 
 Deployment to a fresh Windows Server requires only **Git** and an elevated PowerShell prompt. The installer script handles everything else.
@@ -27,14 +25,13 @@ winget install --id Git.Git -e --accept-source-agreements --accept-package-agree
 cd C:\Projects
 git clone https://github.com/itopstalk/FoundryWebUI.git FoundryLocalWebUI
 cd FoundryLocalWebUI
+
+# Windows Server 2025:
 .\Install-FoundryWebUI.ps1
-```
-You will need to run the following to run unsigned scripts (remember to reenable later)
 
-```powershell
-Set-ExecutionPolicy unrestricted
+# Windows 10/11:
+.\Install-FoundryWebUI-Desktop.ps1
 ```
-
 
 ### What the installer does
 
@@ -42,6 +39,8 @@ On **first run**, the script performs the following (all automated, no manual st
 
 - **Checks for WinGet** -- required for installing other components
 - **Installs IIS** with required features (WebSockets, static compression, Windows Authentication)
+  - Windows Server: uses `Install-WindowsFeature`
+  - Windows 10/11: uses `Enable-WindowsOptionalFeature` (DISM)
 - **Installs .NET 8.0 Hosting Bundle** -- required for IIS to run ASP.NET Core apps
 - **Installs .NET 8.0 SDK** -- required to build the application from source
 - **Installs Microsoft Foundry Local** via WinGet and pins it to port 5273
@@ -55,14 +54,19 @@ On **subsequent runs** (after `git pull`), the script auto-detects the existing 
 
 - Skips prerequisite installation (IIS, .NET, Foundry Local)
 - Stops the IIS site, rebuilds from source, and redeploys
-- **Preserves your `appsettings.json` customizations** (e.g., Foundry endpoint)
+- **Preserves your `appsettings.json` and `system-prompts.json`** customizations
 
 ### Update an existing deployment
 
 ```powershell
 cd C:\Projects\FoundryLocalWebUI
 git pull
+
+# Windows Server:
 .\Install-FoundryWebUI.ps1
+
+# Windows 10/11:
+.\Install-FoundryWebUI-Desktop.ps1
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the full step-by-step manual guide and troubleshooting.
@@ -188,7 +192,8 @@ FoundryLocalWebUI/
 ├── Program.cs                    # App startup and DI configuration
 ├── appsettings.json              # Configuration (Foundry endpoint)
 ├── web.config                    # IIS hosting configuration
-├── Install-FoundryWebUI.ps1      # Automated deployment script
+├── Install-FoundryWebUI.ps1      # Automated installer (Windows Server)
+├── Install-FoundryWebUI-Desktop.ps1  # Automated installer (Windows 10/11)
 └── DEPLOYMENT.md                 # Full deployment & troubleshooting guide
 ```
 
