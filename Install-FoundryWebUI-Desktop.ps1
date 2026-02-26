@@ -487,7 +487,8 @@ if ($Port -eq 80) {
     if ($defaultSite) {
         Write-Info "Stopping Default Web Site (port 80 conflict)..."
         & $appcmd stop site "Default Web Site" 2>$null
-        Write-Success "Default Web Site stopped"
+        & $appcmd set site "Default Web Site" /serverAutoStart:false 2>$null
+        Write-Success "Default Web Site stopped and disabled from auto-start"
     }
 }
 
@@ -517,7 +518,8 @@ if ($existingSite) {
     & $appcmd add site /name:$SiteName /physicalPath:$InstallPath /bindings:"http/*:${Port}:" | Out-Null
     & $appcmd set app "$SiteName/" /applicationPool:$AppPoolName | Out-Null
 }
-Write-Success "Website '$SiteName' created on port $Port"
+& $appcmd set site $SiteName /serverAutoStart:true 2>$null
+Write-Success "Website '$SiteName' configured on port $Port (auto-start enabled)"
 
 # ============================================================
 # Step 7: Configure application settings
