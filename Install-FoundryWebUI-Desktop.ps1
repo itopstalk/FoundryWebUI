@@ -270,11 +270,9 @@ Write-Step "Step 3: Installing .NET 8.0 Hosting Bundle"
 
 # Check if hosting bundle is already installed
 $ancmInstalled = $false
-try {
-    Import-Module WebAdministration -ErrorAction SilentlyContinue
-    $modules = Get-WebGlobalModule -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*AspNetCore*" }
-    if ($modules) { $ancmInstalled = $true }
-} catch { }
+# Check for ANCM v2 DLL directly (avoids PS7 compatibility issues with Get-WebGlobalModule)
+$ancmPath = Join-Path $env:ProgramFiles "IIS\Asp.Net Core Module\V2\aspnetcorev2.dll"
+if (Test-Path $ancmPath) { $ancmInstalled = $true }
 
 if ($ancmInstalled) {
     Write-Success ".NET Hosting Bundle already installed (ANCM v2 detected)"
@@ -288,9 +286,7 @@ if ($ancmInstalled) {
     net start w3svc 2>&1 | Out-Null
 
     # Verify
-    Import-Module WebAdministration -Force -ErrorAction SilentlyContinue
-    $modules = Get-WebGlobalModule -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*AspNetCore*" }
-    if ($modules) {
+    if (Test-Path $ancmPath) {
         Write-Success ".NET 8.0 Hosting Bundle installed and ANCM v2 registered"
     } else {
         Write-Warning2 "ANCM v2 not detected after install. You may need to restart and re-run."
