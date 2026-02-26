@@ -356,6 +356,30 @@ if (Test-CommandExists "foundry") {
         Write-Warning2 "Could not start Foundry Local service: $_"
     }
 
+    # Configure Foundry Local to auto-start at system startup
+    Write-Info "Configuring Foundry Local to start automatically on boot..."
+    try {
+        $foundryPath = (Get-Command foundry -ErrorAction Stop).Source
+        $taskName = "FoundryLocalAutoStart"
+        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+        $action = New-ScheduledTaskAction -Execute $foundryPath -Argument "service start"
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
+        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+        if ($existingTask) {
+            Set-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
+            Write-Success "Updated scheduled task '$taskName' for auto-start"
+        } else {
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
+            Write-Success "Created scheduled task '$taskName' for auto-start"
+        }
+    } catch {
+        Write-Warning2 "Could not configure auto-start: $_"
+        Write-Info "You can start Foundry manually with: foundry service start"
+    }
+
     # Set the endpoint for appsettings.json if not explicitly provided
     if (-not $FoundryEndpoint) {
         $FoundryEndpoint = "http://localhost:$FoundryPort"
