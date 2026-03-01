@@ -1,6 +1,6 @@
 # FoundryLocalWebUI
 
-A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core -- designed to run on Windows Server alongside your local LLM inference engine.
+Experimental web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think of it as a self-hosted [Open WebUI](https://github.com/open-webui/open-webui) alternative built with ASP.NET Core -- designed to run on Windows Server alongside your local LLM inference engine.
 
 > **Note**: This project supports **Foundry Local only**. Ollama is not supported.
 
