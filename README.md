@@ -4,6 +4,8 @@ A web-based chat interface for **Microsoft Foundry Local**, hosted on IIS. Think
 
 > **Note**: This project supports **Foundry Local only**. Ollama is not supported.
 
+[![Introduction to Foundry Local Web UI for IIS](https://img.youtube.com/vi/IGWNhSQziZI/0.jpg)](https://youtu.be/IGWNhSQziZI)
+
 ![Platform](https://img.shields.io/badge/platform-Windows%20Server%202025-blue)
 ![Framework](https://img.shields.io/badge/.NET-8.0-purple)
 ![License](https://img.shields.io/badge/license-MIT-green)
