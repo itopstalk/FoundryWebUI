@@ -307,6 +307,38 @@ if (Test-CommandExists "foundry") {
     }
 }
 
+# Ensure the Foundry MSIX install directory is on the system PATH
+# (Foundry Local is an MSIX package; its app execution alias only works for the installing user)
+$foundryDir = $null
+try {
+    $pkg = Get-AppxPackage -Name "Microsoft.FoundryLocal" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pkg -and $pkg.InstallLocation -and (Test-Path (Join-Path $pkg.InstallLocation "foundry.exe"))) {
+        $foundryDir = $pkg.InstallLocation
+    }
+} catch { }
+if (-not $foundryDir) {
+    # Fallback: scan WindowsApps manually
+    $waDir = Join-Path $env:ProgramFiles "WindowsApps"
+    if (Test-Path $waDir) {
+        $dirs = Get-ChildItem $waDir -Directory -Filter "Microsoft.FoundryLocal_*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+        foreach ($d in $dirs) {
+            if (Test-Path (Join-Path $d.FullName "foundry.exe")) { $foundryDir = $d.FullName; break }
+        }
+    }
+}
+if ($foundryDir) {
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    if ($machinePath -notlike "*$foundryDir*") {
+        [System.Environment]::SetEnvironmentVariable("Path", "$machinePath;$foundryDir", "Machine")
+        $env:Path = "$env:Path;$foundryDir"
+        Write-Success "Added Foundry install directory to system PATH: $foundryDir"
+    } else {
+        Write-Info "Foundry directory already on system PATH"
+    }
+} else {
+    Write-Warning2 "Could not locate Foundry MSIX install directory to add to system PATH."
+}
+
 # Start Foundry service with a fixed port
 if (Test-CommandExists "foundry") {
     Write-Info "Configuring Foundry Local to use fixed port $FoundryPort..."

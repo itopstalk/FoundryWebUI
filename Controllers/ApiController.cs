@@ -438,10 +438,13 @@ public class ApiController : ControllerBase
         // Run: foundry cache cd <path>
         try
         {
+            var foundryExe = ResolveFoundryExecutable();
+            _logger.LogInformation("Using Foundry CLI at: {Path}", foundryExe);
+
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
-                FileName = "foundry",
+                FileName = foundryExe,
                 Arguments = $"cache cd \"{newPath}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -466,8 +469,57 @@ public class ApiController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to run foundry cache cd");
-            return StatusCode(500, new { error = $"Failed to run Foundry CLI: {ex.Message}. Ensure 'foundry' is on the system PATH." });
+            return StatusCode(500, new { error = $"Failed to run Foundry CLI: {ex.Message}. Ensure Foundry Local is installed (winget install Microsoft.FoundryLocal)." });
         }
+    }
+
+    /// <summary>
+    /// Resolves the full path to foundry.exe, searching MSIX WindowsApps, user aliases, and PATH.
+    /// </summary>
+    private static string ResolveFoundryExecutable()
+    {
+        // 1. Check MSIX install location (Foundry Local is an MSIX package)
+        try
+        {
+            var windowsApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps");
+            if (Directory.Exists(windowsApps))
+            {
+                var foundryDirs = Directory.GetDirectories(windowsApps, "Microsoft.FoundryLocal_*");
+                foreach (var dir in foundryDirs.OrderByDescending(d => d))
+                {
+                    var exe = Path.Combine(dir, "foundry.exe");
+                    if (System.IO.File.Exists(exe))
+                        return exe;
+                }
+            }
+        }
+        catch { /* WindowsApps may be access-restricted; continue searching */ }
+
+        // 2. Check per-user WindowsApps alias locations for all user profiles
+        try
+        {
+            var usersDir = Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))!;
+            foreach (var userDir in Directory.GetDirectories(usersDir))
+            {
+                var aliasPath = Path.Combine(userDir, "AppData", "Local", "Microsoft", "WindowsApps", "foundry.exe");
+                if (System.IO.File.Exists(aliasPath))
+                    return aliasPath;
+            }
+        }
+        catch { }
+
+        // 3. Search PATH
+        var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(';') ?? Array.Empty<string>();
+        foreach (var dir in pathDirs)
+        {
+            if (string.IsNullOrWhiteSpace(dir)) continue;
+            var exe = Path.Combine(dir.Trim(), "foundry.exe");
+            if (System.IO.File.Exists(exe))
+                return exe;
+        }
+
+        // 4. Fallback — let the OS try to find it
+        return "foundry";
     }
 
     public class CacheDirectoryRequest
