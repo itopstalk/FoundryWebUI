@@ -446,52 +446,100 @@ public class ApiController : ControllerBase
             return BadRequest(new { error = $"Cannot create directory: {ex.Message}" });
         }
 
-        // Run: foundry cache cd <path>
+        // Update foundry.config.json directly instead of using the CLI.
+        // The CLI requires IPC with the running Foundry service, which fails
+        // when run from an IIS app pool identity due to MSIX sandboxing.
         try
         {
-            var foundryExe = ResolveFoundryExecutable();
-            _logger.LogInformation("Using Foundry CLI at: {Path}", foundryExe);
+            var configPath = await ResolveFoundryConfigPath(provider);
+            if (configPath == null)
+                return StatusCode(500, new { error = "Cannot find foundry.config.json. Ensure Foundry Local has been started at least once." });
 
-            // Foundry writes .foundry/foundry.config.json under %USERPROFILE%.
-            // The IIS app pool has no real profile, so we set USERPROFILE to the
-            // user home where .foundry already exists and use a neutral working directory.
-            var foundryHome = await ResolveFoundryHomeDirectory(provider);
-            _logger.LogInformation("Foundry USERPROFILE override: {Dir}", foundryHome);
+            _logger.LogInformation("Updating Foundry config at: {Path}", configPath);
 
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
+            var jsonText = await System.IO.File.ReadAllTextAsync(configPath);
+            using var doc = JsonDocument.Parse(jsonText);
+            var root = doc.RootElement;
+
+            // Rebuild the JSON with the updated cacheDirectoryPath
+            var configObj = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonText, _jsonOptions)
+                            ?? new Dictionary<string, object>();
+
+            // Parse serviceSettings as a mutable dictionary
+            var serviceSettings = new Dictionary<string, object>();
+            if (root.TryGetProperty("serviceSettings", out var ss))
             {
-                FileName = foundryExe,
-                Arguments = $"cache cd \"{newPath}\"",
-                WorkingDirectory = Path.GetTempPath(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            process.StartInfo.Environment["USERPROFILE"] = foundryHome;
-            process.StartInfo.Environment["HOMEDRIVE"] = Path.GetPathRoot(foundryHome)?.TrimEnd('\\') ?? "C:";
-            process.StartInfo.Environment["HOMEPATH"] = foundryHome.Substring(Path.GetPathRoot(foundryHome)?.Length ?? 0);
-            process.Start();
-            var stdout = await process.StandardOutput.ReadToEndAsync();
-            var stderr = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-            {
-                var errorMsg = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
-                _logger.LogError("foundry cache cd failed (exit {Code}): {Error}", process.ExitCode, errorMsg);
-                return StatusCode(500, new { error = $"Foundry CLI returned exit code {process.ExitCode}: {errorMsg}" });
+                foreach (var prop in ss.EnumerateObject())
+                {
+                    serviceSettings[prop.Name] = prop.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => prop.Value.GetString()!,
+                        JsonValueKind.Number => prop.Value.TryGetInt32(out var i) ? i : prop.Value.GetDouble(),
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        _ => prop.Value.GetRawText()
+                    };
+                }
             }
+            serviceSettings["cacheDirectoryPath"] = newPath;
+            configObj["serviceSettings"] = serviceSettings;
 
-            _logger.LogInformation("Cache directory changed to {Path}. Output: {Output}", newPath, stdout.Trim());
-            return Ok(new { path = newPath, message = stdout.Trim() });
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var updatedJson = JsonSerializer.Serialize(configObj, options);
+            await System.IO.File.WriteAllTextAsync(configPath, updatedJson);
+
+            _logger.LogInformation("Cache directory changed to {Path} in {Config}", newPath, configPath);
+            return Ok(new { path = newPath, message = $"Cache directory updated to {newPath}. Restart the Foundry service for changes to take effect." });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to run foundry cache cd");
-            return StatusCode(500, new { error = $"Failed to run Foundry CLI: {ex.Message}. Ensure Foundry Local is installed (winget install Microsoft.FoundryLocal)." });
+            _logger.LogError(ex, "Failed to update foundry.config.json");
+            return StatusCode(500, new { error = $"Failed to update Foundry config: {ex.Message}" });
         }
+    }
+
+    /// <summary>
+    /// Finds the path to foundry.config.json by deriving from the current cache path
+    /// or searching user profiles.
+    /// </summary>
+    private async Task<string?> ResolveFoundryConfigPath(FoundryLocalService? provider)
+    {
+        // 1. Derive from current cache path
+        if (provider != null)
+        {
+            try
+            {
+                var cachePath = await provider.GetCacheDirectoryAsync();
+                if (!string.IsNullOrEmpty(cachePath))
+                {
+                    var dir = cachePath;
+                    while (!string.IsNullOrEmpty(dir))
+                    {
+                        if (Path.GetFileName(dir) == ".foundry")
+                        {
+                            var config = Path.Combine(dir, "foundry.config.json");
+                            if (System.IO.File.Exists(config)) return config;
+                        }
+                        dir = Path.GetDirectoryName(dir);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 2. Search user profiles
+        try
+        {
+            var usersDir = Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))!;
+            foreach (var userDir in Directory.GetDirectories(usersDir))
+            {
+                var config = Path.Combine(userDir, ".foundry", "foundry.config.json");
+                if (System.IO.File.Exists(config)) return config;
+            }
+        }
+        catch { }
+
+        return null;
     }
 
     /// <summary>
