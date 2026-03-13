@@ -17,11 +17,40 @@ let editingId = null;
 let promptModal = null;
 let originalCachePath = '';
 
+// Foundry CLI info elements
+const foundryInfoLoading = document.getElementById('foundry-info-loading');
+const foundryInfoContent = document.getElementById('foundry-info-content');
+const foundryInfoIcon = document.getElementById('foundry-info-icon');
+const foundryInfoPath = document.getElementById('foundry-info-path');
+
 document.addEventListener('DOMContentLoaded', () => {
     promptModal = new bootstrap.Modal(document.getElementById('prompt-modal'));
     loadPrompts();
     loadCacheDirectory();
+    loadFoundryInfo();
 });
+
+// ============================================================
+// Foundry CLI Info
+// ============================================================
+
+async function loadFoundryInfo() {
+    try {
+        const res = await fetch('/api/settings/foundry-info');
+        const data = await res.json();
+        foundryInfoLoading.style.display = 'none';
+        foundryInfoContent.style.display = 'block';
+        if (data.found) {
+            foundryInfoIcon.innerHTML = '<span class="badge bg-success">Found</span>';
+            foundryInfoPath.textContent = data.executablePath;
+        } else {
+            foundryInfoIcon.innerHTML = '<span class="badge bg-danger">Not Found</span>';
+            foundryInfoPath.textContent = data.executablePath === 'foundry' ? 'foundry.exe not found on this system' : data.executablePath;
+        }
+    } catch (err) {
+        foundryInfoLoading.innerHTML = `<span class="text-danger small">Could not detect Foundry CLI: ${err.message}</span>`;
+    }
+}
 
 // ============================================================
 // Cache Directory

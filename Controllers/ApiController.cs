@@ -412,6 +412,14 @@ public class ApiController : ControllerBase
         return Ok(new { path = path ?? "", detected = path != null });
     }
 
+    [HttpGet("settings/foundry-info")]
+    public IActionResult GetFoundryInfo()
+    {
+        var resolvedPath = ResolveFoundryExecutable();
+        var found = resolvedPath != "foundry" && System.IO.File.Exists(resolvedPath);
+        return Ok(new { executablePath = resolvedPath, found });
+    }
+
     [HttpPut("settings/cache-directory")]
     public async Task<IActionResult> SetCacheDirectory([FromBody] CacheDirectoryRequest request)
     {
