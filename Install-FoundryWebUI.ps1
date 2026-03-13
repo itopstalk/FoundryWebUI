@@ -389,27 +389,33 @@ if (Test-CommandExists "foundry") {
     }
 
     # Configure Foundry Local to auto-start at system startup
-    Write-Info "Configuring Foundry Local to start automatically on boot..."
-    try {
-        $foundryPath = (Get-Command foundry -ErrorAction Stop).Source
-        $taskName = "FoundryLocalAutoStart"
-        $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $taskName = "FoundryLocalAutoStart"
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($existingTask) {
+        Write-Success "Scheduled task '$taskName' already exists — skipping creation"
+    } else {
+        Write-Info "Creating scheduled task '$taskName' to start Foundry at boot..."
+        try {
+            # Use the MSIX-resolved path if available, otherwise fall back to Get-Command
+            $foundryPath = $null
+            if ($foundryDir -and (Test-Path (Join-Path $foundryDir "foundry.exe"))) {
+                $foundryPath = Join-Path $foundryDir "foundry.exe"
+            } else {
+                try { $foundryPath = (Get-Command foundry -ErrorAction Stop).Source } catch { }
+            }
+            if (-not $foundryPath) { throw "Could not resolve foundry.exe path for scheduled task" }
 
-        $action = New-ScheduledTaskAction -Execute $foundryPath -Argument "service start"
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
-        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+            $action = New-ScheduledTaskAction -Execute $foundryPath -Argument "service start"
+            $trigger = New-ScheduledTaskTrigger -AtStartup
+            $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+            $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
-        if ($existingTask) {
-            Set-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
-            Write-Success "Updated scheduled task '$taskName' for auto-start"
-        } else {
             Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
-            Write-Success "Created scheduled task '$taskName' for auto-start"
+            Write-Success "Created scheduled task '$taskName' — Foundry will start automatically on boot"
+        } catch {
+            Write-Warning2 "Could not configure auto-start: $_"
+            Write-Info "You can start Foundry manually with: foundry service start"
         }
-    } catch {
-        Write-Warning2 "Could not configure auto-start: $_"
-        Write-Info "You can start Foundry manually with: foundry service start"
     }
 
     # Set the endpoint for appsettings.json if not explicitly provided
