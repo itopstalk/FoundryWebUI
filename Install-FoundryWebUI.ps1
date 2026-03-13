@@ -454,6 +454,47 @@ if ($existingTask) {
         Write-Info "You can start Foundry manually with: foundry service start"
     }
 }
+
+# ============================================================
+# Check if Foundry Local service is running
+# ============================================================
+Write-Step "Checking Foundry Local service status"
+
+$foundryEndpointCheck = if ($FoundryEndpoint) { $FoundryEndpoint } else { "http://localhost:$FoundryPort" }
+try {
+    $statusResp = Invoke-RestMethod "$foundryEndpointCheck/openai/status" -TimeoutSec 5 -ErrorAction Stop
+    Write-Success "Foundry Local service is running at $foundryEndpointCheck"
+    if ($statusResp.ModelDirPath) { Write-Info "  Model cache:   $($statusResp.ModelDirPath)" }
+    elseif ($statusResp.modelDirPath) { Write-Info "  Model cache:   $($statusResp.modelDirPath)" }
+} catch {
+    Write-Warning2 "Foundry Local service is NOT responding at $foundryEndpointCheck"
+    Write-Info "  Attempting to start Foundry Local service..."
+    try {
+        $startProc = Start-Process -FilePath "foundry" -ArgumentList "service", "start" `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\foundry-check-start.log" `
+            -RedirectStandardError "$env:TEMP\foundry-check-start-err.log" -ErrorAction Stop
+        $exited = $startProc.WaitForExit(30000)
+        if (-not $exited) { try { $startProc.Kill() } catch { } }
+        Remove-Item "$env:TEMP\foundry-check-start.log", "$env:TEMP\foundry-check-start-err.log" -Force -ErrorAction SilentlyContinue
+
+        # Re-check after start attempt
+        Start-Sleep -Seconds 3
+        try {
+            $statusResp = Invoke-RestMethod "$foundryEndpointCheck/openai/status" -TimeoutSec 5 -ErrorAction Stop
+            Write-Success "Foundry Local service is now running"
+        } catch {
+            Write-Warning2 "Foundry Local service still not responding after start attempt"
+            Write-Info "  You may need to start it manually: foundry service start"
+        }
+    } catch {
+        Write-Warning2 "Could not start Foundry Local service: $_"
+        Write-Info "  You may need to start it manually: foundry service start"
+    }
+}
+
+# ============================================================
+# Step 5: Stop existing site, build, and publish
+# ============================================================
 if ($isUpdate) {
     Write-Step "Stopping IIS site for update"
     $appcmd = "$env:SystemRoot\System32\inetsrv\appcmd.exe"
