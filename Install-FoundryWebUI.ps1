@@ -393,6 +393,16 @@ if (Test-CommandExists "foundry") {
     $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($existingTask) {
         Write-Success "Scheduled task '$taskName' already exists — skipping creation"
+        $taskInfo = $existingTask | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue
+        Write-Info "  Task state:    $($existingTask.State)"
+        Write-Info "  Action:        $($existingTask.Actions[0].Execute) $($existingTask.Actions[0].Arguments)"
+        Write-Info "  Run as:        $($existingTask.Principal.UserId)"
+        if ($taskInfo.LastRunTime) { Write-Info "  Last run:      $($taskInfo.LastRunTime)" }
+        if ($taskInfo.NextRunTime) { Write-Info "  Next run:      $($taskInfo.NextRunTime)" }
+        if ($taskInfo.LastTaskResult -ne $null) {
+            $resultHex = "0x{0:X}" -f $taskInfo.LastTaskResult
+            Write-Info "  Last result:   $($taskInfo.LastTaskResult) ($resultHex)"
+        }
     } else {
         Write-Info "Creating scheduled task '$taskName' to start Foundry at boot..."
         try {
@@ -412,6 +422,9 @@ if (Test-CommandExists "foundry") {
 
             Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
             Write-Success "Created scheduled task '$taskName' — Foundry will start automatically on boot"
+            Write-Info "  Action:        $foundryPath service start"
+            Write-Info "  Run as:        SYSTEM"
+            Write-Info "  Trigger:       At system startup"
         } catch {
             Write-Warning2 "Could not configure auto-start: $_"
             Write-Info "You can start Foundry manually with: foundry service start"
