@@ -747,6 +747,7 @@ try {
     if (-not $foundryCachePath -or -not (Test-Path $foundryCachePath)) {
         $possibleCachePaths = @(
             "$env:USERPROFILE\.foundry\cache\models",
+            "C:\Users\Administrator\.foundry\cache\models",
             "$env:LOCALAPPDATA\.foundry\cache\models"
         )
         foreach ($p in $possibleCachePaths) {
