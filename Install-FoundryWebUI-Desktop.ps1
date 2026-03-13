@@ -410,48 +410,6 @@ if (Test-CommandExists "foundry") {
         Write-Warning2 "Could not start Foundry Local service: $_"
     }
 
-    # Configure Foundry Local to auto-start at system startup
-    $taskName = "FoundryLocalAutoStart"
-    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    if ($existingTask) {
-        Write-Success "Scheduled task '$taskName' already exists — skipping creation"
-        $taskInfo = $existingTask | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue
-        Write-Info "  Task state:    $($existingTask.State)"
-        Write-Info "  Action:        $($existingTask.Actions[0].Execute) $($existingTask.Actions[0].Arguments)"
-        Write-Info "  Run as:        $($existingTask.Principal.UserId)"
-        if ($taskInfo.LastRunTime) { Write-Info "  Last run:      $($taskInfo.LastRunTime)" }
-        if ($taskInfo.NextRunTime) { Write-Info "  Next run:      $($taskInfo.NextRunTime)" }
-        if ($taskInfo.LastTaskResult -ne $null) {
-            $resultHex = "0x{0:X}" -f $taskInfo.LastTaskResult
-            Write-Info "  Last result:   $($taskInfo.LastTaskResult) ($resultHex)"
-        }
-    } else {
-        Write-Info "Creating scheduled task '$taskName' to start Foundry at boot..."
-        try {
-            $foundryPath = $null
-            if ($foundryDir -and (Test-Path (Join-Path $foundryDir "foundry.exe"))) {
-                $foundryPath = Join-Path $foundryDir "foundry.exe"
-            } else {
-                try { $foundryPath = (Get-Command foundry -ErrorAction Stop).Source } catch { }
-            }
-            if (-not $foundryPath) { throw "Could not resolve foundry.exe path for scheduled task" }
-
-            $action = New-ScheduledTaskAction -Execute $foundryPath -Argument "service start"
-            $trigger = New-ScheduledTaskTrigger -AtStartup
-            $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-            $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-
-            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
-            Write-Success "Created scheduled task '$taskName' — Foundry will start automatically on boot"
-            Write-Info "  Action:        $foundryPath service start"
-            Write-Info "  Run as:        SYSTEM"
-            Write-Info "  Trigger:       At system startup"
-        } catch {
-            Write-Warning2 "Could not configure auto-start: $_"
-            Write-Info "You can start Foundry manually with: foundry service start"
-        }
-    }
-
     if (-not $FoundryEndpoint) {
         $FoundryEndpoint = "http://localhost:$FoundryPort"
         Write-Info "Foundry endpoint will be set to $FoundryEndpoint in appsettings.json"
@@ -459,6 +417,62 @@ if (Test-CommandExists "foundry") {
 }
 
 } # End of prerequisites block
+
+# ============================================================
+# Foundry auto-start scheduled task (runs on every invocation)
+# ============================================================
+Write-Step "Checking Foundry auto-start scheduled task"
+
+$taskName = "FoundryLocalAutoStart"
+$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($existingTask) {
+    Write-Success "Scheduled task '$taskName' exists"
+    $taskInfo = $existingTask | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue
+    Write-Info "  Task state:    $($existingTask.State)"
+    Write-Info "  Action:        $($existingTask.Actions[0].Execute) $($existingTask.Actions[0].Arguments)"
+    Write-Info "  Run as:        $($existingTask.Principal.UserId)"
+    if ($taskInfo.LastRunTime) { Write-Info "  Last run:      $($taskInfo.LastRunTime)" }
+    if ($taskInfo.NextRunTime) { Write-Info "  Next run:      $($taskInfo.NextRunTime)" }
+    if ($taskInfo.LastTaskResult -ne $null) {
+        $resultHex = "0x{0:X}" -f $taskInfo.LastTaskResult
+        Write-Info "  Last result:   $($taskInfo.LastTaskResult) ($resultHex)"
+    }
+} else {
+    Write-Info "Creating scheduled task '$taskName' to start Foundry at boot..."
+    try {
+        $foundryPath = $null
+        if ($foundryDir -and (Test-Path (Join-Path $foundryDir "foundry.exe"))) {
+            $foundryPath = Join-Path $foundryDir "foundry.exe"
+        } else {
+            try { $foundryPath = (Get-Command foundry -ErrorAction Stop).Source } catch { }
+        }
+        if (-not $foundryPath) {
+            $waDir = Join-Path $env:ProgramFiles "WindowsApps"
+            if (Test-Path $waDir) {
+                $dirs = Get-ChildItem $waDir -Directory -Filter "Microsoft.FoundryLocal_*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+                foreach ($d in $dirs) {
+                    $candidate = Join-Path $d.FullName "foundry.exe"
+                    if (Test-Path $candidate) { $foundryPath = $candidate; break }
+                }
+            }
+        }
+        if (-not $foundryPath) { throw "Could not resolve foundry.exe path for scheduled task" }
+
+        $action = New-ScheduledTaskAction -Execute $foundryPath -Argument "service start"
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings | Out-Null
+        Write-Success "Created scheduled task '$taskName' — Foundry will start automatically on boot"
+        Write-Info "  Action:        $foundryPath service start"
+        Write-Info "  Run as:        SYSTEM"
+        Write-Info "  Trigger:       At system startup"
+    } catch {
+        Write-Warning2 "Could not configure auto-start: $_"
+        Write-Info "You can start Foundry manually with: foundry service start"
+    }
+}
 
 # ============================================================
 # Step 5: Stop existing site, build, and publish
