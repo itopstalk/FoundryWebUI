@@ -554,16 +554,42 @@ if ($systemPromptsBackup) {
 }
 
 if (Test-Path $appSettingsPath) {
+    $settings = Get-Content $appSettingsPath -Raw | ConvertFrom-Json
+
     if ($FoundryEndpoint) {
         Write-Info "Setting Foundry endpoint to $FoundryEndpoint"
-        $settings = Get-Content $appSettingsPath -Raw | ConvertFrom-Json
         $settings.LlmProviders.Foundry.Endpoint = $FoundryEndpoint
-        $settings | ConvertTo-Json -Depth 10 | Set-Content $appSettingsPath -Encoding UTF8
         Write-Success "Foundry endpoint configured"
     } else {
         Write-Info "Foundry endpoint set to auto-detect (blank). Set explicitly if needed."
     }
-    # No CLI path needed -- the app uses REST APIs for all Foundry interactions
+
+    # Resolve and store the foundry CLI executable path
+    $foundryExePath = $null
+    try { $foundryExePath = (Get-Command foundry -ErrorAction Stop).Source } catch { }
+    if (-not $foundryExePath -or -not (Test-Path $foundryExePath)) {
+        # Search the MSIX install directory
+        $waDir = Join-Path $env:ProgramFiles "WindowsApps"
+        if (Test-Path $waDir) {
+            $dirs = Get-ChildItem $waDir -Directory -Filter "Microsoft.FoundryLocal_*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+            foreach ($d in $dirs) {
+                $candidate = Join-Path $d.FullName "foundry.exe"
+                if (Test-Path $candidate) { $foundryExePath = $candidate; break }
+            }
+        }
+    }
+    if ($foundryExePath -and (Test-Path $foundryExePath)) {
+        # Ensure the FoundryExecutablePath property exists
+        if (-not ($settings.PSObject.Properties.Name -contains "FoundryExecutablePath")) {
+            $settings | Add-Member -NotePropertyName "FoundryExecutablePath" -NotePropertyValue ""
+        }
+        $settings.FoundryExecutablePath = $foundryExePath
+        Write-Success "Foundry CLI path stored in appsettings.json: $foundryExePath"
+    } else {
+        Write-Warning2 "Could not resolve foundry.exe path to store in appsettings.json"
+    }
+
+    $settings | ConvertTo-Json -Depth 10 | Set-Content $appSettingsPath -Encoding UTF8
 } else {
     Write-Warning2 "appsettings.json not found at $appSettingsPath"
 }

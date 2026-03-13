@@ -13,16 +13,18 @@ public class ApiController : ControllerBase
     private readonly IEnumerable<ILlmProvider> _providers;
     private readonly ILogger<ApiController> _logger;
     private readonly SystemPromptStore _promptStore;
+    private readonly IConfiguration _configuration;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public ApiController(IEnumerable<ILlmProvider> providers, ILogger<ApiController> logger, SystemPromptStore promptStore)
+    public ApiController(IEnumerable<ILlmProvider> providers, ILogger<ApiController> logger, SystemPromptStore promptStore, IConfiguration configuration)
     {
         _providers = providers;
         _logger = logger;
         _promptStore = promptStore;
+        _configuration = configuration;
     }
 
     private ILlmProvider? GetProvider(string provider)
@@ -482,10 +484,16 @@ public class ApiController : ControllerBase
     }
 
     /// <summary>
-    /// Resolves the full path to foundry.exe, searching MSIX WindowsApps, user aliases, and PATH.
+    /// Resolves the full path to foundry.exe, checking appsettings.json first,
+    /// then searching MSIX WindowsApps, user aliases, and PATH.
     /// </summary>
-    private static string ResolveFoundryExecutable()
+    private string ResolveFoundryExecutable()
     {
+        // 0. Check appsettings.json (set by install script at deploy time)
+        var configPath = _configuration["FoundryExecutablePath"];
+        if (!string.IsNullOrWhiteSpace(configPath) && System.IO.File.Exists(configPath))
+            return configPath;
+
         // 1. Check MSIX install location (Foundry Local is an MSIX package)
         try
         {
