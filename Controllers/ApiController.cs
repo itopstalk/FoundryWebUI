@@ -429,6 +429,7 @@ public class ApiController : ControllerBase
             return BadRequest(new { error = "Path is required" });
 
         var newPath = request.Path.Trim();
+        var provider = GetProvider("foundry") as FoundryLocalService;
 
         // Validate the path is a valid absolute path
         if (!Path.IsPathFullyQualified(newPath))
@@ -451,11 +452,18 @@ public class ApiController : ControllerBase
             var foundryExe = ResolveFoundryExecutable();
             _logger.LogInformation("Using Foundry CLI at: {Path}", foundryExe);
 
+            // Determine a writable working directory for foundry CLI.
+            // Foundry writes .foundry/foundry.config.json relative to the user profile.
+            // The IIS app pool has no real profile, so we derive it from the current cache path.
+            var workingDir = await ResolveFoundryHomeDirectory(provider);
+            _logger.LogInformation("Foundry CLI working directory: {Dir}", workingDir);
+
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = foundryExe,
                 Arguments = $"cache cd \"{newPath}\"",
+                WorkingDirectory = workingDir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -536,6 +544,54 @@ public class ApiController : ControllerBase
 
         // 4. Fallback — let the OS try to find it
         return "foundry";
+    }
+
+    /// <summary>
+    /// Determines a writable working directory for the foundry CLI process.
+    /// Foundry writes .foundry/foundry.config.json relative to the user's home directory.
+    /// Since the IIS app pool has no real profile, we derive it from the current cache path
+    /// or search for an existing .foundry directory on disk.
+    /// </summary>
+    private async Task<string> ResolveFoundryHomeDirectory(FoundryLocalService? provider)
+    {
+        // 1. Derive from current cache path (e.g., C:\Users\Administrator\.foundry\cache\models)
+        if (provider != null)
+        {
+            try
+            {
+                var cachePath = await provider.GetCacheDirectoryAsync();
+                if (!string.IsNullOrEmpty(cachePath))
+                {
+                    var foundryDir = cachePath;
+                    while (!string.IsNullOrEmpty(foundryDir))
+                    {
+                        if (Path.GetFileName(foundryDir) == ".foundry")
+                        {
+                            var homeDir = Path.GetDirectoryName(foundryDir);
+                            if (homeDir != null && Directory.Exists(homeDir))
+                                return homeDir;
+                        }
+                        foundryDir = Path.GetDirectoryName(foundryDir);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 2. Search user profiles for existing .foundry directories
+        try
+        {
+            var usersDir = Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))!;
+            foreach (var userDir in Directory.GetDirectories(usersDir))
+            {
+                if (Directory.Exists(Path.Combine(userDir, ".foundry")))
+                    return userDir;
+            }
+        }
+        catch { }
+
+        // 3. Fallback to temp directory
+        return Path.GetTempPath();
     }
 
     public class CacheDirectoryRequest
