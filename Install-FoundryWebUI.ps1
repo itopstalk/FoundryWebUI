@@ -754,6 +754,37 @@ try {
     Write-Warning2 "Failed to set Foundry cache permissions: $_"
 }
 
+# Write access to Foundry config directory (.foundry) — needed for foundry cache cd command
+try {
+    $foundryConfigDir = $null
+    if ($foundryCachePath) {
+        # Derive .foundry dir from cache path (e.g., C:\Users\Admin\.foundry\cache\models -> C:\Users\Admin\.foundry)
+        $dir = $foundryCachePath
+        while ($dir) {
+            if ((Split-Path $dir -Leaf) -eq ".foundry") { $foundryConfigDir = $dir; break }
+            $dir = Split-Path $dir -Parent
+        }
+    }
+    if (-not $foundryConfigDir) {
+        # Check common locations
+        @("$env:USERPROFILE\.foundry", "C:\Users\Administrator\.foundry") | ForEach-Object {
+            if ((Test-Path $_) -and -not $foundryConfigDir) { $foundryConfigDir = $_ }
+        }
+    }
+    if ($foundryConfigDir -and (Test-Path $foundryConfigDir)) {
+        $acl = Get-Acl $foundryConfigDir
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            "IIS AppPool\$AppPoolName", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+        $acl.SetAccessRule($rule)
+        Set-Acl $foundryConfigDir $acl
+        Write-Success "Write permission granted on Foundry config: $foundryConfigDir"
+    } else {
+        Write-Warning2 "Could not find .foundry config directory — changing cache dir from UI may fail"
+    }
+} catch {
+    Write-Warning2 "Failed to set Foundry config permissions: $_"
+}
+
 # ============================================================
 # Step 9: Configure firewall
 # ============================================================

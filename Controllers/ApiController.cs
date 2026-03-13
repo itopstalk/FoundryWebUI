@@ -452,23 +452,26 @@ public class ApiController : ControllerBase
             var foundryExe = ResolveFoundryExecutable();
             _logger.LogInformation("Using Foundry CLI at: {Path}", foundryExe);
 
-            // Determine a writable working directory for foundry CLI.
-            // Foundry writes .foundry/foundry.config.json relative to the user profile.
-            // The IIS app pool has no real profile, so we derive it from the current cache path.
-            var workingDir = await ResolveFoundryHomeDirectory(provider);
-            _logger.LogInformation("Foundry CLI working directory: {Dir}", workingDir);
+            // Foundry writes .foundry/foundry.config.json under %USERPROFILE%.
+            // The IIS app pool has no real profile, so we set USERPROFILE to the
+            // user home where .foundry already exists and use a neutral working directory.
+            var foundryHome = await ResolveFoundryHomeDirectory(provider);
+            _logger.LogInformation("Foundry USERPROFILE override: {Dir}", foundryHome);
 
             using var process = new Process();
             process.StartInfo = new ProcessStartInfo
             {
                 FileName = foundryExe,
                 Arguments = $"cache cd \"{newPath}\"",
-                WorkingDirectory = workingDir,
+                WorkingDirectory = Path.GetTempPath(),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+            process.StartInfo.Environment["USERPROFILE"] = foundryHome;
+            process.StartInfo.Environment["HOMEDRIVE"] = Path.GetPathRoot(foundryHome)?.TrimEnd('\\') ?? "C:";
+            process.StartInfo.Environment["HOMEPATH"] = foundryHome.Substring(Path.GetPathRoot(foundryHome)?.Length ?? 0);
             process.Start();
             var stdout = await process.StandardOutput.ReadToEndAsync();
             var stderr = await process.StandardError.ReadToEndAsync();
