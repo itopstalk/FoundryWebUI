@@ -57,6 +57,30 @@ public class FoundryLocalService : ILlmProvider
         return "http://localhost:5272";
     }
 
+    public async Task<string?> GetCacheDirectoryAsync()
+    {
+        try
+        {
+            var endpoint = await GetEndpointAsync();
+            using var cts = new CancellationTokenSource(5000);
+            var resp = await _httpClient.GetAsync($"{endpoint}/openai/status", cts.Token);
+            if (resp.IsSuccessStatusCode)
+            {
+                var json = await resp.Content.ReadAsStringAsync(cts.Token);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("modelDirPath", out var mdp))
+                    return mdp.GetString();
+                if (doc.RootElement.TryGetProperty("ModelDirPath", out var mdp2))
+                    return mdp2.GetString();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get cache directory from Foundry status endpoint");
+        }
+        return null;
+    }
+
     public async Task<ProviderStatus> GetStatusAsync()
     {
         try

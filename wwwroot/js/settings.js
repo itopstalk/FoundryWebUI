@@ -1,4 +1,4 @@
-// settings.js - System prompt management
+// settings.js - System prompt management + cache directory
 const promptsList = document.getElementById('prompts-list');
 const btnAddPrompt = document.getElementById('btn-add-prompt');
 const btnSavePrompt = document.getElementById('btn-save-prompt');
@@ -6,12 +6,85 @@ const promptName = document.getElementById('prompt-name');
 const promptContent = document.getElementById('prompt-content');
 const promptModalTitle = document.getElementById('prompt-modal-title');
 
+// Cache directory elements
+const cacheDirLoading = document.getElementById('cache-dir-loading');
+const cacheDirContent = document.getElementById('cache-dir-content');
+const cacheDirPath = document.getElementById('cache-dir-path');
+const btnSaveCacheDir = document.getElementById('btn-save-cache-dir');
+const cacheDirStatus = document.getElementById('cache-dir-status');
+
 let editingId = null;
 let promptModal = null;
+let originalCachePath = '';
 
 document.addEventListener('DOMContentLoaded', () => {
     promptModal = new bootstrap.Modal(document.getElementById('prompt-modal'));
     loadPrompts();
+    loadCacheDirectory();
+});
+
+// ============================================================
+// Cache Directory
+// ============================================================
+
+async function loadCacheDirectory() {
+    try {
+        const res = await fetch('/api/settings/cache-directory');
+        const data = await res.json();
+        cacheDirLoading.style.display = 'none';
+        cacheDirContent.style.display = 'block';
+        if (data.detected) {
+            cacheDirPath.value = data.path;
+            originalCachePath = data.path;
+        } else {
+            cacheDirPath.value = '';
+            cacheDirPath.placeholder = 'Could not detect — enter path manually';
+        }
+    } catch (err) {
+        cacheDirLoading.innerHTML = `<span class="text-danger">Error loading cache directory: ${err.message}</span>`;
+    }
+}
+
+function showCacheStatus(message, type) {
+    cacheDirStatus.style.display = 'block';
+    cacheDirStatus.className = `mt-2 small text-${type}`;
+    cacheDirStatus.textContent = message;
+}
+
+btnSaveCacheDir.addEventListener('click', async () => {
+    const newPath = cacheDirPath.value.trim();
+    if (!newPath) {
+        showCacheStatus('Path is required.', 'danger');
+        return;
+    }
+    if (newPath === originalCachePath) {
+        showCacheStatus('No change — path is the same.', 'muted');
+        return;
+    }
+
+    btnSaveCacheDir.disabled = true;
+    btnSaveCacheDir.textContent = '⏳ Saving...';
+    cacheDirStatus.style.display = 'none';
+
+    try {
+        const res = await fetch('/api/settings/cache-directory', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: newPath })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            originalCachePath = data.path;
+            showCacheStatus(`✅ Cache directory updated. ${data.message || ''}`, 'success');
+        } else {
+            showCacheStatus(`❌ ${data.error}`, 'danger');
+        }
+    } catch (err) {
+        showCacheStatus(`❌ ${err.message}`, 'danger');
+    } finally {
+        btnSaveCacheDir.disabled = false;
+        btnSaveCacheDir.textContent = '💾 Save';
+    }
 });
 
 async function loadPrompts() {

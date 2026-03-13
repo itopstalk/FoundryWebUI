@@ -398,6 +398,84 @@ public class ApiController : ControllerBase
     }
 
     // ============================================================
+    // Settings API — Cache Directory
+    // ============================================================
+
+    [HttpGet("settings/cache-directory")]
+    public async Task<IActionResult> GetCacheDirectory()
+    {
+        var provider = GetProvider("foundry") as FoundryLocalService;
+        if (provider == null)
+            return StatusCode(503, new { error = "Foundry Local provider not available" });
+
+        var path = await provider.GetCacheDirectoryAsync();
+        return Ok(new { path = path ?? "", detected = path != null });
+    }
+
+    [HttpPut("settings/cache-directory")]
+    public async Task<IActionResult> SetCacheDirectory([FromBody] CacheDirectoryRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Path))
+            return BadRequest(new { error = "Path is required" });
+
+        var newPath = request.Path.Trim();
+
+        // Validate the path is a valid absolute path
+        if (!Path.IsPathFullyQualified(newPath))
+            return BadRequest(new { error = "Path must be an absolute path (e.g., D:\\FoundryModelCache)" });
+
+        try
+        {
+            // Create directory if it doesn't exist
+            if (!Directory.Exists(newPath))
+                Directory.CreateDirectory(newPath);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = $"Cannot create directory: {ex.Message}" });
+        }
+
+        // Run: foundry cache cd <path>
+        try
+        {
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = "foundry",
+                Arguments = $"cache cd \"{newPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            process.Start();
+            var stdout = await process.StandardOutput.ReadToEndAsync();
+            var stderr = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+            {
+                var errorMsg = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
+                _logger.LogError("foundry cache cd failed (exit {Code}): {Error}", process.ExitCode, errorMsg);
+                return StatusCode(500, new { error = $"Foundry CLI returned exit code {process.ExitCode}: {errorMsg}" });
+            }
+
+            _logger.LogInformation("Cache directory changed to {Path}. Output: {Output}", newPath, stdout.Trim());
+            return Ok(new { path = newPath, message = stdout.Trim() });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to run foundry cache cd");
+            return StatusCode(500, new { error = $"Failed to run Foundry CLI: {ex.Message}. Ensure 'foundry' is on the system PATH." });
+        }
+    }
+
+    public class CacheDirectoryRequest
+    {
+        public string Path { get; set; } = string.Empty;
+    }
+
+    // ============================================================
     // System Prompts API
     // ============================================================
 
