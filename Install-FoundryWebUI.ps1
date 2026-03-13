@@ -636,10 +636,18 @@ if (Test-Path $appSettingsPath) {
     }
 
     # Resolve and store the foundry CLI executable path
+    # Priority: MSIX package path (works for all users) > Get-Command (may return per-user alias)
     $foundryExePath = $null
-    try { $foundryExePath = (Get-Command foundry -ErrorAction Stop).Source } catch { }
-    if (-not $foundryExePath -or -not (Test-Path $foundryExePath)) {
-        # Search the MSIX install directory
+
+    # 1. Check MSIX install location (preferred — works for IIS app pool)
+    try {
+        $pkg = Get-AppxPackage -Name "Microsoft.FoundryLocal" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pkg -and $pkg.InstallLocation) {
+            $candidate = Join-Path $pkg.InstallLocation "foundry.exe"
+            if (Test-Path $candidate) { $foundryExePath = $candidate }
+        }
+    } catch { }
+    if (-not $foundryExePath) {
         $waDir = Join-Path $env:ProgramFiles "WindowsApps"
         if (Test-Path $waDir) {
             $dirs = Get-ChildItem $waDir -Directory -Filter "Microsoft.FoundryLocal_*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending
@@ -649,13 +657,31 @@ if (Test-Path $appSettingsPath) {
             }
         }
     }
+
+    # 2. Fallback to Get-Command (may return per-user WindowsApps alias)
+    if (-not $foundryExePath) {
+        try { $foundryExePath = (Get-Command foundry -ErrorAction Stop).Source } catch { }
+    }
+
     if ($foundryExePath -and (Test-Path $foundryExePath)) {
-        # Ensure the FoundryExecutablePath property exists
         if (-not ($settings.PSObject.Properties.Name -contains "FoundryExecutablePath")) {
             $settings | Add-Member -NotePropertyName "FoundryExecutablePath" -NotePropertyValue ""
         }
         $settings.FoundryExecutablePath = $foundryExePath
         Write-Success "Foundry CLI path stored in appsettings.json: $foundryExePath"
+
+        # Grant IIS app pool Read+Execute on the Foundry install directory
+        $foundryInstallDir = Split-Path $foundryExePath -Parent
+        try {
+            $acl = Get-Acl $foundryInstallDir
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                "IIS AppPool\$AppPoolName", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow")
+            $acl.SetAccessRule($rule)
+            Set-Acl $foundryInstallDir $acl
+            Write-Success "Read/Execute permission granted to IIS AppPool\$AppPoolName on Foundry directory"
+        } catch {
+            Write-Warning2 "Could not set permissions on Foundry directory: $_"
+        }
     } else {
         Write-Warning2 "Could not resolve foundry.exe path to store in appsettings.json"
     }
